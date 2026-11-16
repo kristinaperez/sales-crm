@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Колонки CSV{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Сопоставление колонок</h1>
+<p class="lead">{{ batch.source_label }} · строк с данными: {{ csv.total }}</p></div></div>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form method="post" action="/import/{{ batch.id }}/mapping">
+  <div class="tablewrap"><table>
+    <thead><tr><th>Колонка в файле</th><th>Поле CRM</th><th>Примеры значений</th></tr></thead>
+    <tbody>
+    {% for i in range(csv.width) %}
+    <tr>
+      <td><b>{{ csv.headers[i] }}</b></td>
+      <td style="min-width:240px"><select name="col_{{ i }}">
+        <option value="skip" {{ 'selected' if csv.mapping[i] == 'skip' }}>— не импортировать —</option>
+        {% for key, label in fields.items() %}<option value="{{ key }}" {{ 'selected' if csv.mapping[i] == key }}>{{ label }}</option>{% endfor %}
+      </select></td>
+      <td class="muted small">{% for r in csv.sample %}{% if r[i] is defined and r[i] %}{{ r[i]|truncate(60) }}{% if not loop.last %} · {% endif %}{% endif %}{% endfor %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p><label class="check"><input type="checkbox" name="has_header" value="1" {{ 'checked' if csv.has_header }}> Первая строка файла — заголовки</label></p>
+  <div class="actions">
+    <button class="btn primary">Дальше — предпросмотр</button>
+    <button class="btn" formaction="/import/{{ batch.id }}/cancel">Отменить импорт</button>
+  </div>
+</form>
+{% endblock %}

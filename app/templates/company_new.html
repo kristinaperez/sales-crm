@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Новая компания{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Новая компания</h1></div></div>
+{% if error %}<div class="flash error">{{ error }} {% if dup_id %}<a href="/companies/{{ dup_id }}">Открыть её карточку</a>{% endif %}</div>{% endif %}
+<form method="post" action="/companies/new" class="card" style="max-width:820px">
+  {% include "_company_fields.html" %}
+  <div class="fields">
+    <div><label>Источник</label><input type="text" name="source" value="{{ data.source or '' }}" placeholder="Откуда узнали о компании"></div>
+    <div><label>Создать сделку в воронке</label><select name="pipeline_id">{% for p in pipelines %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}<option value="">Не создавать</option></select></div>
+    <div><label>Ответственный</label><select name="owner_id"><option value="">Не назначен</option>{% for m in managers %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}</select></div>
+  </div>
+  <button class="btn primary">Добавить</button> <a class="btn" href="/companies">Отмена</a>
+</form>
+{% endblock %}

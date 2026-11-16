@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Импорт{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Импорт компаний</h1>
+<p class="lead">Загрузите список — перед записью вы увидите предпросмотр и сможете поправить строки.</p></div></div>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form method="post" action="/import" enctype="multipart/form-data" class="card">
+  <div class="tabs">
+    {% for value, label in [('text', 'Вставить текст'), ('txt', 'TXT-файл'), ('csv', 'CSV-файл'), ('sheets', 'Google Таблицы')] %}
+    <label data-for="{{ value }}"><input type="radio" name="mode" value="{{ value }}" class="hidden" {{ 'checked' if mode == value }}>{{ label }}</label>
+    {% endfor %}
+  </div>
+  <div data-mode="text">
+    <p class="muted">Обычный текст, список ссылок или ответ ChatGPT — в том числе с таблицей. Одна компания на строку; строки вида «Сайт: …», «Телефон: …» под названием относятся к той же компании.</p>
+  </div>
+  <div data-mode="sheets">
+    <p class="muted">Выделите диапазон в Google Таблицах, скопируйте и вставьте сюда. Если первая строка — заголовки («Название», «Город», «Сайт»…), колонки определятся по ним.</p>
+  </div>
+  <div data-mode="text sheets">
+    <textarea name="text" rows="14" placeholder="Вставьте список сюда">{{ text }}</textarea>
+  </div>
+  <div data-mode="txt">
+    <p class="muted">Текстовый файл в кодировке UTF-8 или Windows-1251, до 8 МБ.</p>
+  </div>
+  <div data-mode="csv">
+    <p class="muted">CSV с разделителем «,» или «;». На следующем шаге вы сопоставите колонки файла с полями CRM.</p>
+  </div>
+  <div data-mode="txt csv"><input type="file" name="file" accept=".txt,.csv,text/plain,text/csv"></div>
+  <p style="margin-top:14px"><button class="btn primary">Показать предпросмотр</button></p>
+  <p class="muted small">Ссылки сохраняются как данные: CRM не открывает сайты и не обращается к внешним ИИ-сервисам.</p>
+</form>
+
+{% if recent %}
+<h2>Последние импорты</h2>
+<div class="tablewrap"><table>
+  <thead><tr><th>№</th><th>Источник</th><th>Кто</th><th>Когда</th><th>Статус</th><th class="num">Создано</th><th class="num">На проверку</th><th class="num">Пропущено</th></tr></thead>
+  <tbody>
+  {% for b in recent %}
+  <tr>
+    <td><a href="/import/{{ b.id }}">№{{ b.id }}</a></td>
+    <td>{{ b.source_label }}</td><td>{{ b.user.name }}</td><td class="nowrap">{{ b.created_at|dt }}</td>
+    <td>{% if b.status == 'confirmed' %}<span class="chip created">подтверждён</span>{% elif b.status == 'cancelled' %}<span class="chip">отменён</span>{% else %}<span class="chip duplicate">ждёт подтверждения</span>{% endif %}</td>
+    <td class="num">{{ b.created_count if b.status == 'confirmed' else '—' }}</td>
+    <td class="num">{{ b.review_count if b.status == 'confirmed' else '—' }}</td>
+    <td class="num">{{ b.skipped_count if b.status == 'confirmed' else '—' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

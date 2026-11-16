@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Воронки{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Настройки</h1></div></div>
+<div class="tabs"><a class="on" href="/settings/pipelines">Воронки и этапы</a><a href="/settings/users">Сотрудники</a></div>
+{% for p in pipelines %}
+<div class="card">
+  <form method="post" action="/settings/pipelines/{{ p.id }}" class="row" style="margin-bottom:12px">
+    <div style="flex:2 1 240px"><label>Воронка {% if p.is_default %}<span class="chip stage">основная</span>{% endif %}{% if p.is_archived %}<span class="chip">в архиве</span>{% endif %}</label><input type="text" name="name" value="{{ p.name }}"></div>
+    <div class="fit actions">
+      <button class="btn sm" name="action" value="rename">Переименовать</button>
+      {% if not p.is_default %}<button class="btn sm" name="action" value="default">Сделать основной</button>
+      <button class="btn sm" name="action" value="archive">{{ 'Вернуть из архива' if p.is_archived else 'В архив' }}</button>{% endif %}
+    </div>
+  </form>
+  <table>
+    <thead><tr><th>Этап</th><th>Тип</th><th>В отчёте считается как</th><th></th></tr></thead>
+    <tbody>
+    {% for s in p.stages %}
+    <tr>
+      <td><input form="st{{ s.id }}" type="text" name="name" value="{{ s.name }}"></td>
+      <td><select form="st{{ s.id }}" name="kind">{% for k, label in STAGE_KINDS.items() %}<option value="{{ k }}" {{ 'selected' if s.kind == k }}>{{ label }}</option>{% endfor %}</select></td>
+      <td><select form="st{{ s.id }}" name="metric_key"><option value="">—</option>{% for k, label in METRICS.items() %}<option value="{{ k }}" {{ 'selected' if s.metric_key == k }}>{{ label }}</option>{% endfor %}</select></td>
+      <td class="nowrap">
+        <form id="st{{ s.id }}" method="post" action="/settings/stages/{{ s.id }}">
+        <button class="btn sm" name="action" value="save">Сохранить</button>
+        <button class="btn sm" name="action" value="up" title="Выше">↑</button>
+        <button class="btn sm" name="action" value="down" title="Ниже">↓</button>
+        <button class="btn sm danger" name="action" value="delete" data-confirm="Удалить этап «{{ s.name }}»?">Удалить</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="/settings/pipelines/{{ p.id }}" class="row" style="margin-top:12px">
+    <div><input type="text" name="name" placeholder="Название нового этапа"></div>
+    <div class="fit"><button class="btn" name="action" value="add_stage">Добавить этап</button></div>
+  </form>
+</div>
+{% endfor %}
+<div class="card">
+  <h2>Новая воронка</h2>
+  <form method="post" action="/settings/pipelines" class="row">
+    <div><input type="text" name="name" placeholder="Название воронки"></div>
+    <div class="fit"><button class="btn primary">Создать</button></div>
+  </form>
+</div>
+{% endblock %}

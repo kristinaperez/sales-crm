@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Импорт выполняется{% endblock %}
+{% block content %}
+<div class="card" style="max-width:640px">
+  <h1>Импорт №{{ batch.id }} ещё не завершён</h1>
+  <p>Карточки создаются порциями. Обычно это занимает несколько секунд — обновите страницу.</p>
+  <p class="muted">Если импорт прервался (например, сервер перезапускали), его можно продолжить: уже созданные карточки повторно не создаются.</p>
+  <form method="post" action="/import/{{ batch.id }}/confirm" class="actions">
+    <input type="hidden" name="resume" value="1">
+    <a class="btn" href="/import/{{ batch.id }}">Обновить</a>
+    <button class="btn primary">Продолжить импорт</button>
+  </form>
+</div>
+{% endblock %}

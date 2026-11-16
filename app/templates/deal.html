@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% from "_history.html" import timeline %}
+{% block title %}{{ company.name }} — сделка{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{{ company.name }}</h1>
+<p class="lead">Сделка · {{ deal.pipeline.name }} · <span class="chip {{ 'stage' if deal.stage.kind == 'open' else deal.stage.kind }}">{{ deal.stage.name }}</span>
+ · ответственный: <b>{{ deal.owner.name if deal.owner else 'не назначен' }}</b></p></div>
+<div class="actions"><a class="btn" href="/companies/{{ company.id }}">Карточка компании</a><a class="btn" href="/pipeline?pipeline_id={{ deal.pipeline_id }}">← Воронка</a></div></div>
+
+{% if conflict %}
+<div class="flash error"><b>Изменение не записано.</b> Пока вы работали с карточкой, сделку изменил другой пользователь.
+Сейчас: этап «{{ deal.stage.name }}», ответственный — {{ deal.owner.name if deal.owner else 'не назначен' }}. Проверьте и повторите действие, если оно ещё нужно.</div>
+{% endif %}
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+<div class="grid2">
+<div>
+  <div class="card">
+    <h2>Что сделано</h2>
+    <form method="post" action="/deals/{{ deal.id }}/touch">
+      <input type="hidden" name="version" value="{{ deal.version }}">
+      <div class="fields">
+        <div><label>Тип</label><select name="kind">{% for k in kinds %}<option value="{{ k }}" {{ 'selected' if draft.kind == k }}>{{ ACTIVITY_KINDS[k] }}</option>{% endfor %}</select></div>
+        <div><label>Перевести на этап</label><select name="stage_id" data-lost-target="touch-lost">
+          <option value="">Оставить «{{ deal.stage.name }}»</option>
+          {% for s in deal.pipeline.stages %}{% if s.id != deal.stage_id %}<option value="{{ s.id }}" data-kind="{{ s.kind }}" {{ 'selected' if draft.stage_id == s.id|string }}>{{ s.name }}</option>{% endif %}{% endfor %}
+        </select></div>
+        <div id="touch-lost" class="hidden"><label>Причина отказа</label><input type="text" name="lost_reason" value="{{ draft.lost_reason or '' }}"></div>
+        <div class="wide"><label>Результат: что написали или сказали, что ответил клиент</label><textarea name="body" rows="3" required>{{ draft.body or '' }}</textarea></div>
+        <div><label>Повторный контакт — дата</label><input type="date" name="followup_due" value="{{ draft.followup_due or '' }}"></div>
+        <div><label>Что сделать при повторном контакте</label><input type="text" name="followup_title" value="{{ draft.followup_title or '' }}" placeholder="Повторный контакт"></div>
+      </div>
+      <button class="btn primary">Записать</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Задачи</h2>
+    {% for t in tasks %}
+    <div class="row" style="align-items:center;padding:6px 0;border-bottom:1px solid #eef0f3">
+      <div>{% if t.done_at %}<s class="muted">{{ t.title }}</s>{% else %}<b>{{ t.title }}</b>{% endif %}
+        <div class="small muted">{{ t.assignee.name if t.assignee else 'не назначена' }}</div></div>
+      <div class="fit">{% if t.done_at %}<span class="chip won">выполнена {{ t.done_at|dt }}</span>
+        {% else %}<span class="chip {{ 'overdue' if t.due_date < today() }}">до {{ t.due_date|d }}</span>{% endif %}</div>
+      {% if not t.done_at %}<div class="fit"><form method="post" action="/tasks/{{ t.id }}/done"><button class="btn sm">Выполнено</button></form></div>{% endif %}
+    </div>
+    {% else %}<p class="muted">Задач нет.</p>{% endfor %}
+    <form method="post" action="/deals/{{ deal.id }}/tasks" class="row" style="margin-top:12px">
+      <div style="flex:2 1 200px"><label>Новая задача</label><input type="text" name="title" placeholder="Повторный контакт"></div>
+      <div><label>Срок</label><input type="date" name="due_date" required></div>
+      <div class="fit"><button class="btn">Поставить</button></div>
+    </form>
+  </div>
+
+  <div class="card"><h2>История</h2>{{ timeline(history) }}</div>
+</div>
+
+<div>
+  <div class="card">
+    <h2>Этап</h2>
+    <form method="post" action="/deals/{{ deal.id }}/stage">
+      <input type="hidden" name="version" value="{{ deal.version }}">
+      <div class="row">
+        <div><select name="stage_id" data-lost-target="stage-lost">{% for s in deal.pipeline.stages %}<option value="{{ s.id }}" data-kind="{{ s.kind }}" {{ 'selected' if s.id == deal.stage_id }}>{{ s.name }}</option>{% endfor %}</select></div>
+        <div class="fit"><button class="btn">Сменить этап</button></div>
+      </div>
+      <div id="stage-lost" class="hidden" style="margin-top:8px"><label>Причина отказа</label><input type="text" name="lost_reason" value="{{ deal.lost_reason or '' }}"></div>
+    </form>
+    {% if deal.lost_reason %}<p class="small" style="margin:10px 0 0">Причина отказа: {{ deal.lost_reason }}</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Следующий шаг</h2>
+    <form method="post" action="/deals/{{ deal.id }}/next-step">
+      <input type="hidden" name="version" value="{{ deal.version }}">
+      <div class="fields">
+        <div class="wide"><label>Что делаем</label><input type="text" name="next_step" value="{{ deal.next_step or '' }}" placeholder="Например: отправить предложение"></div>
+        <div><label>Срок</label><input type="date" name="next_step_due" value="{{ deal.next_step_due.isoformat() if deal.next_step_due else '' }}"></div>
+      </div>
+      <button class="btn">Сохранить шаг</button>
+      {% if deal.next_step_due and deal.next_step_due < today() and deal.is_open %}<span class="chip overdue">просрочен</span>{% endif %}
+    </form>
+  </div>
+
+  {% if user.is_head %}
+  <div class="card">
+    <h2>Ответственный</h2>
+    <form method="post" action="/deals/{{ deal.id }}/owner" class="row">
+      <input type="hidden" name="version" value="{{ deal.version }}">
+      <div><select name="owner_id"><option value="">Не назначен</option>{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if m.id == deal.owner_id }}>{{ m.name }}</option>{% endfor %}</select></div>
+      <div class="fit"><button class="btn">Передать</button></div>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Компания</h2>
+    <dl class="kv">
+      <dt>Сайт</dt><dd>{% if company.website %}<a href="{{ company.website|href }}" target="_blank" rel="noopener noreferrer">{{ company.website }}</a>{% else %}—{% endif %}</dd>
+      <dt>Город</dt><dd>{{ company.city or '—' }}</dd>
+      <dt>Отрасль</dt><dd>{{ company.industry or '—' }}</dd>
+      <dt>Телефон</dt><dd>{{ company.phone or '—' }}</dd>
+      <dt>Email</dt><dd>{{ company.email or '—' }}</dd>
+      <dt>Мессенджер</dt><dd>{% if company.messenger_url %}<a href="{{ company.messenger_url|href }}" target="_blank" rel="noopener noreferrer">{{ company.messenger_url }}</a>{% else %}—{% endif %}</dd>
+      {% for l in company.links %}<dt>{{ l.kind_label }}</dt><dd><a href="{{ l.url|href }}" target="_blank" rel="noopener noreferrer">{{ l.url|truncate(50) }}</a></dd>{% endfor %}
+      {% for p in company.contacts %}<dt>Контакт</dt><dd><b>{{ p.full_name }}</b>{% if p.position %}, {{ p.position }}{% endif %}<div class="small">{{ [p.phone, p.email, p.messenger]|select|join(' · ') }}</div></dd>{% endfor %}
+      {% if company.note %}<dt>Заметка</dt><dd style="white-space:pre-wrap">{{ company.note }}</dd>{% endif %}
+    </dl>
+    <p style="margin:10px 0 0"><a href="/companies/{{ company.id }}">Изменить данные или добавить контактное лицо →</a></p>
+  </div>
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+{% block content %}
+<div class="login card">
+  <h1>Вход в CRM</h1>
+  <p class="muted">Логин и пароль выдаёт руководитель.</p>
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="fields" style="grid-template-columns:1fr">
+      <div><label for="login">Логин</label><input type="text" id="login" name="login" value="{{ login }}" autofocus autocomplete="username"></div>
+      <div><label for="password">Пароль</label><input type="password" id="password" name="password" autocomplete="current-password"></div>
+    </div>
+    <button class="btn primary">Войти</button>
+  </form>
+</div>
+{% endblock %}
