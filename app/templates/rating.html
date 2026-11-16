@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Рейтинг{% endblock %}
+{% macro table(lines) %}
+<div class="tablewrap"><table>
+  <thead><tr><th>Место</th><th>Менеджер</th><th>Группа</th><th class="num">Оплат</th><th class="num">Сумма</th></tr></thead>
+  <tbody>
+  {% for line in lines %}
+  <tr class="{{ 'me' if line.user.id == user.id }}">
+    <td><span class="place">{{ line.place }}</span></td>
+    <td><b>{{ line.user.name }}</b>{% if line.user.id == user.id %} <span class="chip stage">это вы</span>{% endif %}{% if not line.user.is_active %} <span class="chip">отключён</span>{% endif %}</td>
+    <td>{{ line.user.team.name if line.user.team else '—' }}</td>
+    <td class="num">{{ line.count }}</td>
+    <td class="num nowrap"><b>{{ line.total|money }}</b></td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="empty">Менеджеров пока нет.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+{% endmacro %}
+{% block content %}
+<div class="head"><div><h1>Рейтинг менеджеров</h1>
+<p class="lead">Сумма подтверждённых оплат за месяц, по дате оплаты. Участников: {{ rating.participants }}, всего оплат на {{ rating.total|money }}.</p></div>
+<form method="get" action="/rating" class="row">
+  <div><label>Месяц</label><input type="month" name="month" value="{{ month }}"></div>
+  <div class="fit"><button class="btn primary">Показать</button></div>
+</form></div>
+
+{% if rating.mine %}
+<div class="stats" style="max-width:520px">
+  <div class="stat"><b>{{ rating.mine.place }} <span class="muted" style="font-size:1rem">из {{ rating.participants }}</span></b><span>Ваше место</span></div>
+  <div class="stat"><b>{{ rating.mine.total|money }}</b><span>Ваши подтверждённые оплаты: {{ rating.mine.count }}</span></div>
+</div>
+{% endif %}
+
+<h2>Топ-10</h2>
+{{ table(rating.top) }}
+{% if rating.full and rating.full|length > rating.top|length %}
+<h2>Все менеджеры</h2>
+<p class="small muted">Полный список видите только вы. Остальным видны топ-10 и своё место.</p>
+{{ table(rating.full) }}
+{% endif %}
+<p class="small muted">Оплата попадает в рейтинг после подтверждения руководителем группы или владельцем. При равной сумме выше тот, у кого больше оплат.</p>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Оплаты{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Оплаты</h1>
+<p class="lead">{{ 'Все оплаты отдела' if user.is_owner else ('Оплаты вашей группы' if user.is_lead else 'Ваши оплаты') }}. В рейтинг идут только подтверждённые.</p></div></div>
+<div class="tabs">
+  <a class="{{ 'on' if status == 'pending' }}" href="/payments?status=pending">Ждут подтверждения <span class="n {{ 'hot' if pending }}">{{ pending }}</span></a>
+  <a class="{{ 'on' if status == 'confirmed' }}" href="/payments?status=confirmed">Подтверждённые</a>
+  <a class="{{ 'on' if status == 'rejected' }}" href="/payments?status=rejected">Отклонённые</a>
+  <a class="{{ 'on' if status == 'all' }}" href="/payments?status=all">Все</a>
+</div>
+<div class="tablewrap"><table>
+  <thead><tr><th>Дата оплаты</th><th>Компания</th><th>Менеджер</th><th class="num">Сумма</th><th>Статус</th><th></th></tr></thead>
+  <tbody>
+  {% for p in items %}
+  <tr>
+    <td class="nowrap">{{ p.paid_on|d }}</td>
+    <td><a href="/deals/{{ p.deal_id }}#payments"><b>{{ p.deal.company.name }}</b></a>{% if p.note %}<div class="small muted">{{ p.note }}</div>{% endif %}</td>
+    <td>{{ p.credited_to.name if p.credited_to else '—' }}</td>
+    <td class="num nowrap"><b>{{ p.amount_minor|money }}</b></td>
+    <td><span class="chip pay-{{ p.status }}">{{ p.status_label }}</span>{% if p.confirmed_by %}<div class="small muted">{{ p.confirmed_by.name }}, {{ p.confirmed_at|dt }}</div>{% endif %}</td>
+    <td class="nowrap">
+      {% if p.id in can_decide %}
+      <form method="post" action="/payments/{{ p.id }}/status" style="display:inline">
+        <input type="hidden" name="back" value="/payments?status={{ status }}">
+        <button class="btn sm primary" name="decision" value="confirmed">Подтвердить</button>
+        <button class="btn sm danger" name="decision" value="rejected" data-confirm="Отклонить оплату? Она не попадёт в рейтинг.">Отклонить</button>
+      </form>
+      {% elif p.status == 'pending' and user.is_lead and p.credited_to_id == user.id %}<span class="small muted">свою оплату подтверждает владелец</span>
+      {% endif %}
+      {% if user.is_owner %}<a class="btn sm" href="/deals/{{ p.deal_id }}#payments">Исправить</a>{% endif %}
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="empty">{% if status == 'pending' %}Оплат, ждущих подтверждения, нет.{% else %}Оплат нет.{% endif %}</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

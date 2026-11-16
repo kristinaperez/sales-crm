@@ -1,0 +1,68 @@
+# Боевой запуск на сервере: CRM за HTTPS-прокси и ежедневная резервная копия.
+#   docker compose -f docker-compose.prod.yml up -d --build
+# В .env обязательно: CRM_DOMAIN=crm.example.com. Остальное — как в .env.example.
+services:
+  crm:
+    build: .
+    restart: unless-stopped
+    # Наружу порт не публикуется: в CRM попадают только через Caddy.
+    expose:
+      - "8000"
+    environment:
+      DATABASE_URL: sqlite:////data/crm.db
+      APP_TZ: ${APP_TZ:-Europe/Moscow}
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-head}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-Владелец}
+      CURRENCY: ${CURRENCY:-₽}
+      SECRET_KEY: ${SECRET_KEY:-}
+      SEED_DEMO: "0"
+      SESSION_HTTPS_ONLY: "1"
+      # Запросы приходят только от Caddy из внутренней сети — его заголовкам можно доверять.
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - crm-data:/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - crm
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CRM_DOMAIN: ${CRM_DOMAIN:?Укажите CRM_DOMAIN в файле .env, например CRM_DOMAIN=crm.example.com}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  backup:
+    # Раз в сутки делает согласованную копию всей базы в ./backups на сервере и хранит последние 14 дней.
+    build: .
+    restart: unless-stopped
+    user: "0"
+    healthcheck:
+      disable: true
+    depends_on:
+      - crm
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          sleep "$${BACKUP_FIRST_DELAY:-60}"
+          python -m app.cli backup /backups && find /backups -name 'crm-*.db' -mtime +14 -delete
+          sleep 86400
+        done
+    environment:
+      DATABASE_URL: sqlite:////data/crm.db
+      BACKUP_FIRST_DELAY: ${BACKUP_FIRST_DELAY:-60}
+    volumes:
+      - crm-data:/data
+      - ./backups:/backups
+
+volumes:
+  crm-data:
+  caddy-data:
+  caddy-config:

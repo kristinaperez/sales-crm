@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "_history.html" import timeline %}
+{% block title %}{{ company.name }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{{ company.name }} {% if company.status == 'needs_review' %}<span class="chip review">Нужно проверить</span>{% endif %}</h1>
+<p class="lead">{{ company.city or 'Город не указан' }}{% if company.industry %} · {{ company.industry }}{% endif %}</p></div>
+<div class="actions"><a class="btn" href="/companies">← К списку</a></div></div>
+{% if error %}<div class="flash error">{{ error }}
+{% if dup %}{% if dup.owners %} Она в работе у: {{ dup.owners|join(', ') }}.{% else %} Она ещё никому не назначена.{% endif %}
+{% if dup.id %} <a href="/companies/{{ dup.id }}">Открыть карточку «{{ dup.name }}»</a>{% endif %}{% endif %}</div>{% endif %}
+
+<div class="grid2">
+<div>
+  <div class="card">
+    <h2>Сделки</h2>
+    {% for d in deals %}
+    <div class="row" style="align-items:center;padding:6px 0;border-bottom:1px solid #eef0f3">
+      <div><a href="/deals/{{ d.id }}"><b>{{ d.pipeline.name }}</b></a> <span class="chip {{ 'stage' if d.stage.kind == 'open' else d.stage.kind }}">{{ d.stage.name }}</span></div>
+      <div class="small">Ответственный: {{ d.owner.name if d.owner else 'не назначен' }}</div>
+      <div class="small">{% if d.next_step %}{{ d.next_step }} — до {{ d.next_step_due|d }}{% elif d.is_open %}<span class="muted">нет следующего шага</span>{% endif %}</div>
+      <div class="fit"><a class="btn sm" href="/deals/{{ d.id }}">Открыть</a></div>
+    </div>
+    {% else %}<p class="muted">Сделок пока нет.</p>{% endfor %}
+    {% if user.is_owner %}
+    <form method="post" action="/companies/{{ company.id }}/deals" class="row" style="margin-top:12px">
+      <div><label>Новая сделка в воронке</label><select name="pipeline_id">{% for p in pipelines %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select></div>
+      <div><label>Ответственный</label><select name="owner_id"><option value="">Не назначен</option>{% for m in managers %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}</select></div>
+      <div class="fit"><button class="btn">Создать сделку</button></div>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Данные компании</h2>
+    <form method="post" action="/companies/{{ company.id }}/edit">
+      {% set data = company %}{% include "_company_fields.html" %}
+      <div class="actions">
+        <button class="btn primary">Сохранить</button>
+        {% if company.status == 'needs_review' %}<button class="btn" name="mark_checked" value="1">Сохранить и снять пометку «Нужно проверить»</button>{% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="card" id="contacts">
+    <h2>Контактные лица</h2>
+    {% if company.contacts %}
+    <table><thead><tr><th>Имя</th><th>Должность</th><th>Телефон</th><th>Email</th><th>Мессенджер</th><th></th></tr></thead><tbody>
+    {% for p in company.contacts %}
+    <tr><td><b>{{ p.full_name }}</b>{% if p.note %}<div class="small muted">{{ p.note }}</div>{% endif %}</td><td>{{ p.position or '—' }}</td><td>{{ p.phone or '—' }}</td><td>{{ p.email or '—' }}</td><td>{{ p.messenger or '—' }}</td>
+      <td><form method="post" action="/companies/{{ company.id }}/contacts/{{ p.id }}/delete"><button class="linkbtn danger" data-confirm="Удалить контактное лицо?">удалить</button></form></td></tr>
+    {% endfor %}
+    </tbody></table>
+    {% else %}<p class="muted">Контактных лиц пока нет.</p>{% endif %}
+    <details style="margin-top:10px" {{ 'open' if not company.contacts }}><summary>Добавить контактное лицо</summary>
+    <form method="post" action="/companies/{{ company.id }}/contacts" style="margin-top:10px">
+      <div class="fields">
+        <div><label>Имя</label><input type="text" name="full_name" required></div>
+        <div><label>Должность</label><input type="text" name="position"></div>
+        <div><label>Телефон</label><input type="text" name="phone"></div>
+        <div><label>Email</label><input type="text" name="email"></div>
+        <div><label>Мессенджер</label><input type="text" name="messenger"></div>
+        <div><label>Заметка</label><input type="text" name="note"></div>
+      </div>
+      <button class="btn">Добавить</button>
+    </form></details>
+  </div>
+</div>
+
+<div>
+  <div class="card">
+    <h2>Ссылки и источник</h2>
+    <dl class="kv">
+      <dt>Сайт</dt><dd>{% if company.website %}<a href="{{ company.website|href }}" target="_blank" rel="noopener noreferrer">{{ company.website }}</a>{% else %}—{% endif %}</dd>
+      <dt>Мессенджер</dt><dd>{% if company.messenger_url %}<a href="{{ company.messenger_url|href }}" target="_blank" rel="noopener noreferrer">{{ company.messenger_url }}</a>{% else %}—{% endif %}</dd>
+      {% for l in company.links %}
+      <dt>{{ l.kind_label }}</dt><dd><a href="{{ l.url|href }}" target="_blank" rel="noopener noreferrer">{{ l.url|truncate(60) }}</a>
+        <form method="post" action="/companies/{{ company.id }}/links/{{ l.id }}/delete" style="display:inline"><button class="linkbtn danger small">убрать</button></form></dd>
+      {% endfor %}
+      <dt>Источник</dt><dd>{{ company.source or '—' }}</dd>
+      <dt>Создана</dt><dd>{{ company.created_at|dt }}</dd>
+    </dl>
+    <form method="post" action="/companies/{{ company.id }}/links" class="row" style="margin-top:10px">
+      <div><input type="text" name="url" placeholder="Ссылка на соцсеть, карту или каталог"></div>
+      <div class="fit"><button class="btn sm">Добавить ссылку</button></div>
+    </form>
+    {% if company.source_fragment %}
+    <h3 style="margin-top:14px">Исходная строка из списка</h3>
+    <pre class="raw">{{ company.source_fragment }}</pre>
+    {% endif %}
+  </div>
+  <div class="card"><h2>История</h2>{{ timeline(history) }}</div>
+  {% if user.is_owner %}
+  <div class="card">
+    <h2>Удалить компанию</h2>
+    <p class="small muted">Удаляются карточка, все её сделки, задачи, оплаты и история. Оплаты исчезнут из рейтинга. Вернуть можно только из резервной копии.</p>
+    <form method="post" action="/companies/{{ company.id }}/delete"><button class="btn danger" data-confirm="Удалить компанию «{{ company.name }}» со всеми сделками, оплатами и историей?">Удалить компанию</button></form>
+  </div>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Отчёт{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Результаты менеджеров</h1>
+<p class="lead">{{ 'Весь отдел' if user.is_owner else 'Ваша группа' }}: сколько сделок за период перешло на этап. Событие относится к тому, кто был ответственным в момент перехода.</p></div>
+<form method="get" action="/reports" class="row">
+  <div><label>С</label><input type="date" name="date_from" value="{{ report.date_from.isoformat() }}"></div>
+  <div><label>По</label><input type="date" name="date_to" value="{{ report.date_to.isoformat() }}"></div>
+  <div class="fit"><button class="btn primary">Показать</button></div>
+</form></div>
+<div class="tablewrap"><table>
+  <thead><tr><th>Менеджер</th>{% for key, label in METRICS.items() %}<th class="num">{{ label }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for line in report.lines %}
+  <tr><td><b>{{ line.user.name }}</b>{% if not line.user.is_active %} <span class="chip">отключён</span>{% endif %}</td>
+  {% for key in METRICS %}<td class="num">{{ line[key] }}</td>{% endfor %}</tr>
+  {% else %}<tr><td colspan="5" class="empty">Менеджеров пока нет.</td></tr>{% endfor %}
+  {% if report.lines %}<tr><td><b>Всего</b></td>{% for key in METRICS %}<td class="num"><b>{{ report.totals[key] }}</b></td>{% endfor %}</tr>{% endif %}
+  </tbody>
+</table></div>
+<p class="small muted">Здесь считаются переходы по этапам. Деньги и места — в разделе <a href="/rating">«Рейтинг»</a>: там учитываются только подтверждённые оплаты.</p>
+{% endblock %}

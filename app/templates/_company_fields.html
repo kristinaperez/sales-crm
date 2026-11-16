@@ -1,0 +1,10 @@
+<div class="fields">
+  <div class="wide"><label>Название</label><input type="text" name="name" value="{{ data.name or '' }}" required></div>
+  <div><label>Сайт</label><input type="text" name="website" value="{{ data.website or '' }}" placeholder="example.ru"></div>
+  <div><label>Город</label><input type="text" name="city" value="{{ data.city or '' }}"></div>
+  <div><label>Отрасль</label><input type="text" name="industry" value="{{ data.industry or '' }}"></div>
+  <div><label>Телефон</label><input type="text" name="phone" value="{{ data.phone or '' }}"></div>
+  <div><label>Email</label><input type="text" name="email" value="{{ data.email or '' }}"></div>
+  <div><label>Ссылка на мессенджер</label><input type="text" name="messenger_url" value="{{ data.messenger_url or '' }}" placeholder="https://t.me/…"></div>
+  <div class="wide"><label>Заметка</label><textarea name="note" rows="3">{{ data.note or '' }}</textarea></div>
+</div>

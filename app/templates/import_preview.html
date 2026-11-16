@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Предпросмотр импорта{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Предпросмотр импорта №{{ batch.id }}</h1>
+<p class="lead">{{ batch.source_label }} · распознано строк: {{ summary.total }}. Пока ничего не записано.</p></div></div>
+
+<div class="stats">
+  <div class="stat"><b>{{ summary.new }}</b><span>Новая компания</span></div>
+  <div class="stat"><b>{{ summary.duplicate }}</b><span>Возможный дубль</span></div>
+  <div class="stat"><b>{{ summary.review }}</b><span>Нужно проверить</span></div>
+  <div class="stat"><b>{{ summary.excluded }}</b><span>Исключено вами</span></div>
+</div>
+
+<div class="tabs">
+  <a class="{{ 'on' if not status }}" href="/import/{{ batch.id }}">Все <span class="n">{{ summary.total }}</span></a>
+  <a class="{{ 'on' if status == 'new' }}" href="/import/{{ batch.id }}?status=new">Новые <span class="n">{{ summary.new }}</span></a>
+  <a class="{{ 'on' if status == 'duplicate' }}" href="/import/{{ batch.id }}?status=duplicate">Возможные дубли <span class="n">{{ summary.duplicate }}</span></a>
+  <a class="{{ 'on' if status == 'review' }}" href="/import/{{ batch.id }}?status=review">Нужно проверить <span class="n">{{ summary.review }}</span></a>
+  <a class="{{ 'on' if status == 'excluded' }}" href="/import/{{ batch.id }}?status=excluded">Исключённые <span class="n">{{ summary.excluded }}</span></a>
+</div>
+
+<form method="post" action="/import/{{ batch.id }}/rows">
+<input type="hidden" name="status" value="{{ status }}"><input type="hidden" name="page" value="{{ page }}">
+{% if rows %}
+<div class="tablewrap"><table class="preview">
+  <thead><tr><th>№</th><th>Статус</th><th>Название</th><th>Сайт</th><th>Город</th><th>Отрасль</th><th>Телефон</th><th>Email</th><th>Мессенджер</th><th>Исключить</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr class="{{ 'off' if r.excluded }}">
+    <td class="muted">{{ r.row_no }}<input type="hidden" name="row_id" value="{{ r.id }}"></td>
+    <td style="min-width:210px">
+      <span class="chip {{ r.status }}">{{ r.status_label }}</span>
+      {% if r.status == ROW_DUPLICATE %}
+      <div class="hint">
+        {% if r.match_company %}
+          {% if r.match_kind == 'website' %}Тот же сайт:{% elif r.match_kind == 'link' %}Та же ссылка:{% else %}Похожи название и город:{% endif %}
+          {% if r.match_company.id in visible %}<a href="/companies/{{ r.match_company.id }}" target="_blank">{{ r.match_company.name }}</a>
+          {% else %}компания уже есть в базе{% endif %}
+          <div class="muted">{% if owners.get(r.match_company.id) %}В работе у: {{ owners[r.match_company.id]|unique|join(', ') }}{% else %}Пока никому не назначена{% endif %}</div>
+        {% elif r.match_kind == 'excluded_before' %}
+          Эту строку вы уже исключали в прошлом импорте
+        {% elif r.match_row_no %}
+          {% if r.match_kind == 'batch_name' %}Похожа на строку{% else %}Повтор строки{% endif %} №{{ r.match_row_no }} этого списка
+        {% endif %}
+        {% if not r.is_hard_duplicate %}
+          <label class="check" style="margin-top:4px"><input type="checkbox" name="force_{{ r.id }}" value="1" {{ 'checked' if r.force_create }}> Это другая компания — создать</label>
+        {% else %}<div class="muted">Будет пропущена</div>{% endif %}
+      </div>
+      {% elif r.status == ROW_REVIEW %}
+      <div class="hint muted">{{ 'Нет названия' if not r.name else 'Нет сайта и контактов' }} — карточка создастся с пометкой «Нужно проверить»</div>
+      {% endif %}
+    </td>
+    <td><input type="text" name="name_{{ r.id }}" value="{{ r.name }}">
+      <details><summary class="small">исходная строка</summary><div class="raw">{{ r.raw }}</div></details>
+      {% if r.links %}<div class="small muted" style="margin-top:3px">Ссылки: {% for l in r.links %}{{ l|truncate(42) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+      {% if r.note %}<div class="small muted">Заметка: {{ r.note|truncate(90) }}</div>{% endif %}
+      <input type="hidden" name="note_{{ r.id }}" value="{{ r.note }}">
+    </td>
+    <td><input type="text" name="website_{{ r.id }}" value="{{ r.website }}"></td>
+    <td><input type="text" name="city_{{ r.id }}" value="{{ r.city }}" style="min-width:90px"></td>
+    <td><input type="text" name="industry_{{ r.id }}" value="{{ r.industry }}" style="min-width:90px"></td>
+    <td><input type="text" name="phone_{{ r.id }}" value="{{ r.phone }}"></td>
+    <td><input type="text" name="email_{{ r.id }}" value="{{ r.email }}"></td>
+    <td><input type="text" name="messenger_url_{{ r.id }}" value="{{ r.messenger_url }}"></td>
+    <td style="text-align:center"><input type="checkbox" name="excluded_{{ r.id }}" value="1" {{ 'checked' if r.excluded }} aria-label="Исключить строку {{ r.row_no }}"></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<div class="card empty">В этом разделе строк нет.</div>
+{% endif %}
+
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a class="btn sm" href="/import/{{ batch.id }}?status={{ status }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+  <span class="muted">Страница {{ page }} из {{ pages }}</span>
+  {% if page < pages %}<a class="btn sm" href="/import/{{ batch.id }}?status={{ status }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+  <span class="muted small">Перед переходом сохраните правки на этой странице.</span>
+</div>
+{% endif %}
+
+<div class="sticky">
+  <div class="row">
+    <div class="fit">
+      <button class="btn">Сохранить правки и пересчитать</button>
+      {% if summary.review %}<button class="btn" name="bulk" value="exclude_review">Исключить все «Нужно проверить»</button>{% endif %}
+    </div>
+    <div>
+      <label>Создать сделки в воронке</label>
+      <select name="pipeline_id">
+        {% for p in pipelines %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        {% if user.is_owner %}<option value="">Не создавать сделки</option>{% endif %}
+      </select>
+    </div>
+    {% if user.is_owner %}
+    <div>
+      <label>Ответственный</label>
+      <select name="owner_id"><option value="">Назначу позже</option>{% for m in managers %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}</select>
+    </div>
+    {% elif user.is_lead %}
+    <div>
+      <label>Ответственный</label>
+      <select name="owner_id">{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if m.id == user.id }}>{{ m.name }}{{ ' (я, распределю позже)' if m.id == user.id }}</option>{% endfor %}</select>
+    </div>
+    {% else %}
+    <div class="small muted" style="align-self:center">Сделки по новым компаниям будут назначены вам.</div>
+    {% endif %}
+    <div class="fit">
+      <button class="btn primary" formaction="/import/{{ batch.id }}/confirm">Подтвердить импорт</button>
+      <button class="btn danger" formaction="/import/{{ batch.id }}/cancel" data-confirm="Отменить импорт? Карточки не будут созданы.">Отменить</button>
+    </div>
+  </div>
+  <div class="small muted" style="margin-top:6px">
+    После подтверждения: будет создано {{ summary.will_create }}, создано с пометкой «Нужно проверить» {{ summary.will_review }}, пропущено как дубли {{ summary.will_skip }}, исключено {{ summary.excluded }}.
+  </div>
+</div>
+</form>
+{% endblock %}

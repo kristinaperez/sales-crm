@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Воронка{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Воронка{% if pipeline %}: {{ pipeline.name }}{% endif %}</h1>
+<p class="lead">{{ 'Все сделки отдела' if user.is_owner else ('Сделки вашей группы' if user.is_lead else 'Сделки, где вы ответственный') }}</p></div>
+<form method="get" action="/pipeline" class="row">
+  {% if pipelines|length > 1 %}<div><label>Воронка</label><select name="pipeline_id" data-autosubmit>{% for p in pipelines %}<option value="{{ p.id }}" {{ 'selected' if pipeline and p.id == pipeline.id }}>{{ p.name }}</option>{% endfor %}</select></div>{% endif %}
+  {% if user.is_boss %}<div><label>Менеджер</label><select name="owner" data-autosubmit><option value="">Все</option>{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if owner == m.id|string }}>{{ m.name }}</option>{% endfor %}</select></div>{% endif %}
+  <noscript><div class="fit"><button class="btn">Показать</button></div></noscript>
+</form></div>
+
+{% if not pipeline %}<div class="card empty">Воронок пока нет.</div>{% endif %}
+<div class="board">
+{% for col in columns %}
+  <section class="col {{ col.stage.kind if col.stage.kind != 'open' }}">
+    <h3>{{ col.stage.name }} <span>{{ col.count }}</span></h3>
+    {% for d in col.deals %}
+    <div class="deal">
+      <a class="t" href="/deals/{{ d.id }}">{{ d.company.name }}</a>
+      <div class="meta">{{ d.company.city or '' }}{% if user.is_boss %}{% if d.company.city %} · {% endif %}{{ d.owner.name if d.owner else 'не назначен' }}{% endif %}</div>
+      {% if d.next_step %}<div class="meta {{ 'late' if d.next_step_due < today() }}">{{ d.next_step|truncate(40) }} — {{ d.next_step_due|d }}</div>
+      {% elif col.tasks.get(d.id) %}{% set t = col.tasks[d.id] %}<div class="meta {{ 'late' if t.due_date < today() }}">{{ t.title|truncate(40) }} — {{ t.due_date|d }}</div>
+      {% elif d.is_open %}<div class="meta">нет следующего шага</div>{% endif %}
+      {% if d.lost_reason %}<div class="meta">{{ d.lost_reason|truncate(60) }}</div>{% endif %}
+      <form method="post" action="/deals/{{ d.id }}/stage">
+        <input type="hidden" name="version" value="{{ d.version }}">
+        <input type="hidden" name="back" value="/pipeline?pipeline_id={{ pipeline.id }}&owner={{ owner }}">
+        <select name="stage_id" aria-label="Перевести на этап">{% for s in pipeline.stages %}{% if s.kind == 'open' or s.id == d.stage_id %}<option value="{{ s.id }}" {{ 'selected' if s.id == d.stage_id }}>{{ s.name }}</option>{% endif %}{% endfor %}</select>
+        <button class="btn sm">→</button>
+      </form>
+    </div>
+    {% else %}<p class="small muted" style="margin:8px 0 0">Пусто</p>{% endfor %}
+    {% if col.count > col.deals|length %}<p class="small" style="margin:8px 0 0"><a href="/companies?stage_id={{ col.stage.id }}{% if owner %}&owner={{ owner }}{% endif %}">Показать все {{ col.count }} →</a></p>{% endif %}
+  </section>
+{% endfor %}
+</div>
+<p class="small muted">Отметить оплату или закрыть сделку без продажи можно в её карточке: там указывается сумма оплаты или причина отказа.</p>
+{% endblock %}

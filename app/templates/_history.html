@@ -1,0 +1,18 @@
+{% macro timeline(history) %}
+{% if history %}
+<ul class="tl">
+{% for a in history %}
+  <li>
+    <div class="top-line">
+      <span class="chip {{ 'stage' if a.kind in ('stage_change', 'owner_change') }}">{{ a.kind_label }}</span>
+      <span>{{ a.created_at|dt }}</span>
+      <span>{{ a.user.name if a.user else 'система' }}</span>
+    </div>
+    <div class="body">{{ a.body }}</div>
+  </li>
+{% endfor %}
+</ul>
+{% else %}
+<p class="muted">Записей пока нет.</p>
+{% endif %}
+{% endmacro %}

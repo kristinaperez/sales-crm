@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Итог импорта{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Импорт №{{ batch.id }} подтверждён</h1>
+<p class="lead">{{ batch.source_label }} · {{ batch.confirmed_at|dt }} · {{ batch.user.name }}</p></div>
+<div class="actions"><a class="btn primary" href="/companies">К списку компаний</a><a class="btn" href="/import">Новый импорт</a></div></div>
+
+<div class="stats">
+  <div class="stat"><b>{{ batch.created_count }}</b><span>Создано карточек</span></div>
+  <div class="stat"><b>{{ batch.review_count }}</b><span>Создано и отправлено на проверку</span></div>
+  <div class="stat"><b>{{ batch.skipped_count }}</b><span>Пропущено как дубли</span></div>
+  <div class="stat"><b>{{ batch.excluded_count }}</b><span>Исключено вами</span></div>
+</div>
+{% if batch.review_count %}<p><a href="/companies?status=needs_review">Открыть карточки с пометкой «Нужно проверить» →</a></p>{% endif %}
+
+<div class="tabs">
+  <a class="{{ 'on' if not status }}" href="/import/{{ batch.id }}">Все строки</a>
+  <a class="{{ 'on' if status == 'created' }}" href="/import/{{ batch.id }}?status=created">Созданы</a>
+  <a class="{{ 'on' if status == 'review' }}" href="/import/{{ batch.id }}?status=review">На проверку</a>
+  <a class="{{ 'on' if status == 'skipped' }}" href="/import/{{ batch.id }}?status=skipped">Пропущены</a>
+  <a class="{{ 'on' if status == 'excluded' }}" href="/import/{{ batch.id }}?status=excluded">Исключены</a>
+</div>
+<div class="tablewrap"><table>
+  <thead><tr><th>№</th><th>Итог</th><th>Название</th><th>Сайт</th><th>Город</th><th>Карточка</th><th>Исходная строка</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td class="muted">{{ r.row_no }}</td>
+    <td><span class="chip {{ r.result }}">{{ {'created': 'создана', 'review': 'на проверку', 'skipped': 'пропущена', 'excluded': 'исключена'}.get(r.result, r.result) }}</span></td>
+    <td>{{ r.name or '—' }}</td><td>{{ r.website or '—' }}</td><td>{{ r.city or '—' }}</td>
+    <td>{% if r.company_id and r.company_id in visible %}<a href="/companies/{{ r.company_id }}">{{ 'открыть' if r.result != 'skipped' else 'существующая карточка' }}</a>
+        {% elif r.company_id %}<span class="muted">уже в базе</span>{% endif %}
+        {% if r.company_id and r.result == 'skipped' %}<div class="small muted">{% if owners.get(r.company_id) %}в работе у: {{ owners.get(r.company_id)|unique|join(', ') }}{% else %}никому не назначена{% endif %}</div>{% endif %}
+        {% if r.company_id %}
+        {% elif r.match_row_no %}<span class="muted">повтор строки №{{ r.match_row_no }}</span>{% else %}—{% endif %}</td>
+    <td class="small muted" style="max-width:380px;white-space:pre-wrap">{{ r.raw|truncate(200) }}</td>
+  </tr>
+  {% else %}<tr><td colspan="7" class="empty">Строк нет.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a class="btn sm" href="/import/{{ batch.id }}?status={{ status }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+  <span class="muted">Страница {{ page }} из {{ pages }}</span>
+  {% if page < pages %}<a class="btn sm" href="/import/{{ batch.id }}?status={{ status }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
