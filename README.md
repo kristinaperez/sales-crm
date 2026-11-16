@@ -152,8 +152,40 @@ docker compose start crm
 | `SESSION_HTTPS_ONLY` | `0` | `1`, когда CRM открыта по HTTPS |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Адрес обратного прокси, которому можно доверять |
 
-**Доступ из интернета.** Ставьте CRM за обратным прокси с HTTPS (Caddy, nginx, Traefik) и включайте
-`SESSION_HTTPS_ONLY=1`. Прокси должен передавать исходный заголовок `Host`
+## Выкладка на сервер
+
+Нужен сервер с Docker (подойдёт самый маленький VPS) и домен или поддомен, A-запись которого
+указывает на этот сервер. Порты 80 и 443 должны быть открыты.
+
+```bash
+git clone https://github.com/kristinaperez/sales-crm.git && cd sales-crm
+cp .env.example .env
+# в .env: CRM_DOMAIN=crm.example.com и ADMIN_PASSWORD=надёжный-пароль
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+`docker-compose.prod.yml` поднимает три контейнера:
+
+- `crm` — приложение; порт наружу не публикуется;
+- `caddy` — HTTPS: сам получает и продлевает сертификат, перенаправляет http на https;
+- `backup` — раз в сутки кладёт копию всей базы в папку `./backups` на сервере и хранит 14 дней.
+
+Демоданные в боевом запуске выключены. Обновление версии: `git pull`, затем та же команда `up -d --build` —
+данные лежат на томе и сохраняются, миграции применяются при старте.
+
+Копии в `./backups` лежат на том же сервере, что и база. Настройте их вывоз в другое место
+(например, `rclone` или `rsync` по cron): если сервер пропадёт, пропадут и они.
+
+Восстановление в боевом запуске:
+
+```bash
+docker compose -f docker-compose.prod.yml stop crm
+docker compose -f docker-compose.prod.yml run --rm --user 0 -v "$PWD/backups:/backups" --entrypoint sh crm \
+  -c "python -m app.cli restore /backups/crm-ГГГГММДД-ЧЧММСС.db && chown crm:crm /data/crm.db*"
+docker compose -f docker-compose.prod.yml start crm
+```
+
+**Свой прокси вместо Caddy.** Включите `SESSION_HTTPS_ONLY=1` и передавайте исходный заголовок `Host`
 (в nginx: `proxy_set_header Host $host;`) — по нему CRM отличает свои формы от чужих запросов.
 
 ## Разработка

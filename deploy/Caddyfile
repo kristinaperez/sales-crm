@@ -1,0 +1,7 @@
+# HTTPS для CRM. Сертификат Caddy получает и продлевает сам;
+# для этого A-запись домена должна указывать на сервер, а порты 80 и 443 быть открыты.
+{$CRM_DOMAIN} {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy crm:8000
+}
