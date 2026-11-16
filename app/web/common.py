@@ -13,7 +13,8 @@ from starlette.datastructures import FormData
 
 from .. import config
 from ..db import get_db
-from ..models import ACTIVITY_KINDS, METRICS, STAGE_KINDS, User
+from ..models import ACTIVITY_KINDS, METRICS, PAYMENT_STATUSES, ROLES, STAGE_KINDS, User
+from ..services.deals import format_money
 from ..services.access import Forbidden
 from ..services.normalize import ensure_scheme
 from ..services.worklists import today
@@ -43,8 +44,11 @@ def _qs(params: dict, **override) -> str:
 templates.env.filters["dt"] = _dt
 templates.env.filters["d"] = _d
 templates.env.filters["href"] = ensure_scheme
+templates.env.filters["money"] = lambda minor: f"{format_money(minor or 0)} {config.CURRENCY}"
+templates.env.filters["amount"] = lambda minor: format_money(minor or 0).replace(" ", "")
 templates.env.globals.update(
-    qs=_qs, today=today, ACTIVITY_KINDS=ACTIVITY_KINDS, METRICS=METRICS, STAGE_KINDS=STAGE_KINDS
+    qs=_qs, today=today, ACTIVITY_KINDS=ACTIVITY_KINDS, METRICS=METRICS, STAGE_KINDS=STAGE_KINDS,
+    ROLES=ROLES, PAYMENT_STATUSES=PAYMENT_STATUSES, CURRENCY=config.CURRENCY,
 )
 
 
@@ -75,8 +79,15 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
-def head_user(user: User = Depends(current_user)) -> User:
-    if not user.is_head:
+def owner_user(user: User = Depends(current_user)) -> User:
+    if not user.is_owner:
+        raise Forbidden()
+    return user
+
+
+def boss_user(user: User = Depends(current_user)) -> User:
+    """Владелец или руководитель группы."""
+    if not user.is_boss:
         raise Forbidden()
     return user
 

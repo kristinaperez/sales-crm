@@ -22,12 +22,16 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Причина отказа показывается только для этапа-отказа
+  // Причина отказа — для этапа-отказа, сумма и дата оплаты — для этапа-успеха
   document.querySelectorAll('select[data-lost-target]').forEach(function (sel) {
-    var target = document.getElementById(sel.dataset.lostTarget);
+    var lostBox = document.getElementById(sel.dataset.lostTarget);
+    var wonBox = document.getElementById(sel.dataset.wonTarget || '');
     function sync() {
       var opt = sel.options[sel.selectedIndex];
-      var lost = opt && opt.dataset.kind === 'lost';
-      if (target) { target.classList.toggle('hidden', !lost); }
+      // Текущий этап сделки ничего не требует: поля нужны только при переходе.
+      var kind = opt && sel.value !== (sel.dataset.current || '') ? (opt.dataset.kind || '') : '';
+      if (lostBox) { lostBox.classList.toggle('hidden', kind !== 'lost'); }
+      if (wonBox) { wonBox.classList.toggle('hidden', kind !== 'won'); }
     }
     sel.addEventListener('change', sync); sync();
   });

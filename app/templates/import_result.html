@@ -28,8 +28,10 @@
     <td class="muted">{{ r.row_no }}</td>
     <td><span class="chip {{ r.result }}">{{ {'created': 'создана', 'review': 'на проверку', 'skipped': 'пропущена', 'excluded': 'исключена'}.get(r.result, r.result) }}</span></td>
     <td>{{ r.name or '—' }}</td><td>{{ r.website or '—' }}</td><td>{{ r.city or '—' }}</td>
-    <td>{% if r.company_id %}<a href="/companies/{{ r.company_id }}">{{ 'открыть' if r.result != 'skipped' else 'существующая карточка' }}</a>
-        {% if r.result == 'skipped' and owners.get(r.company_id) %}<div class="small muted">{{ owners.get(r.company_id)|unique|join(', ') }}</div>{% endif %}
+    <td>{% if r.company_id and r.company_id in visible %}<a href="/companies/{{ r.company_id }}">{{ 'открыть' if r.result != 'skipped' else 'существующая карточка' }}</a>
+        {% elif r.company_id %}<span class="muted">уже в базе</span>{% endif %}
+        {% if r.company_id and r.result == 'skipped' %}<div class="small muted">{% if owners.get(r.company_id) %}в работе у: {{ owners.get(r.company_id)|unique|join(', ') }}{% else %}никому не назначена{% endif %}</div>{% endif %}
+        {% if r.company_id %}
         {% elif r.match_row_no %}<span class="muted">повтор строки №{{ r.match_row_no }}</span>{% else %}—{% endif %}</td>
     <td class="small muted" style="max-width:380px;white-space:pre-wrap">{{ r.raw|truncate(200) }}</td>
   </tr>

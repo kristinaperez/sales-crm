@@ -34,8 +34,9 @@
       <div class="hint">
         {% if r.match_company %}
           {% if r.match_kind == 'website' %}Тот же сайт:{% elif r.match_kind == 'link' %}Та же ссылка:{% else %}Похожи название и город:{% endif %}
-          <a href="/companies/{{ r.match_company.id }}" target="_blank">{{ r.match_company.name }}</a>
-          <div class="muted">Ответственный: {{ owners.get(r.match_company.id, ['сделок нет'])|unique|join(', ') }}</div>
+          {% if r.match_company.id in visible %}<a href="/companies/{{ r.match_company.id }}" target="_blank">{{ r.match_company.name }}</a>
+          {% else %}компания уже есть в базе{% endif %}
+          <div class="muted">{% if owners.get(r.match_company.id) %}В работе у: {{ owners[r.match_company.id]|unique|join(', ') }}{% else %}Пока никому не назначена{% endif %}</div>
         {% elif r.match_kind == 'excluded_before' %}
           Эту строку вы уже исключали в прошлом импорте
         {% elif r.match_row_no %}
@@ -89,13 +90,22 @@
       <label>Создать сделки в воронке</label>
       <select name="pipeline_id">
         {% for p in pipelines %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
-        <option value="">Не создавать сделки</option>
+        {% if user.is_owner %}<option value="">Не создавать сделки</option>{% endif %}
       </select>
     </div>
+    {% if user.is_owner %}
     <div>
       <label>Ответственный</label>
       <select name="owner_id"><option value="">Назначу позже</option>{% for m in managers %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}</select>
     </div>
+    {% elif user.is_lead %}
+    <div>
+      <label>Ответственный</label>
+      <select name="owner_id">{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if m.id == user.id }}>{{ m.name }}{{ ' (я, распределю позже)' if m.id == user.id }}</option>{% endfor %}</select>
+    </div>
+    {% else %}
+    <div class="small muted" style="align-self:center">Сделки по новым компаниям будут назначены вам.</div>
+    {% endif %}
     <div class="fit">
       <button class="btn primary" formaction="/import/{{ batch.id }}/confirm">Подтвердить импорт</button>
       <button class="btn danger" formaction="/import/{{ batch.id }}/cancel" data-confirm="Отменить импорт? Карточки не будут созданы.">Отменить</button>

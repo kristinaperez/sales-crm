@@ -13,17 +13,21 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from ..models import (
     MANUAL_ACTIVITY_KINDS,
+    PAY_PENDING,
+    PAY_REJECTED,
     STAGE_LOST,
+    STAGE_WON,
     Activity,
     Company,
     Deal,
+    Payment,
     Pipeline,
     Stage,
     Task,
     User,
     utcnow,
 )
-from .access import Forbidden
+from .access import Forbidden, assignable_users
 
 
 class Conflict(Exception):
@@ -60,6 +64,31 @@ def _log(db: Session, deal: Deal, user: User, kind: str, body: str, **extra) -> 
     return act
 
 
+def format_money(minor: int) -> str:
+    whole, cents = divmod(abs(int(minor)), 100)
+    text = f"{whole:,}".replace(",", " ")
+    if cents:
+        text += f",{cents:02d}"
+    return ("-" if minor < 0 else "") + text
+
+
+def record_payment(db: Session, deal: Deal, user: User, amount_minor: int | None, paid_on: date | None,
+                   note: str = "") -> Payment:
+    """Вносит оплату (без commit). Она ждёт подтверждения и до него в рейтинг не идёт."""
+    if not amount_minor or amount_minor <= 0:
+        raise Invalid("Укажите сумму оплаты — число больше нуля.")
+    if paid_on is None:
+        raise Invalid("Укажите дату оплаты.")
+    payment = Payment(
+        deal_id=deal.id, amount_minor=amount_minor, paid_on=paid_on, note=(note or "").strip()[:500] or None,
+        credited_to_id=deal.owner_id or user.id, status=PAY_PENDING, created_by_id=user.id,
+    )
+    db.add(payment)
+    _log(db, deal, user, "payment",
+         f"Внесена оплата {format_money(amount_minor)} от {paid_on.strftime('%d.%m.%Y')} — ждёт подтверждения")
+    return payment
+
+
 def create_deal(db: Session, company: Company, pipeline: Pipeline, owner: User | None, user: User) -> Deal:
     if pipeline.is_archived or not pipeline.stages:
         raise Invalid("Воронка недоступна.")
@@ -71,7 +100,8 @@ def create_deal(db: Session, company: Company, pipeline: Pipeline, owner: User |
     return deal
 
 
-def _apply_stage(db: Session, deal: Deal, stage_id: int, user: User, lost_reason: str | None) -> bool:
+def _apply_stage(db: Session, deal: Deal, stage_id: int, user: User, lost_reason: str | None,
+                 amount_minor: int | None = None, paid_on: date | None = None) -> bool:
     stage = db.get(Stage, stage_id)
     if stage is None or stage.pipeline_id != deal.pipeline_id:
         raise Invalid("Этот этап не относится к воронке сделки.")
@@ -80,6 +110,14 @@ def _apply_stage(db: Session, deal: Deal, stage_id: int, user: User, lost_reason
     reason = (lost_reason or "").strip()
     if stage.kind == STAGE_LOST and not reason:
         raise Invalid("Укажите причину отказа — без неё сделку нельзя закрыть.")
+    if stage.kind == STAGE_WON:
+        has_payment = db.scalar(
+            select(Payment.id).where(Payment.deal_id == deal.id, Payment.status != PAY_REJECTED).limit(1)
+        )
+        if amount_minor or not has_payment:
+            if not amount_minor or paid_on is None:
+                raise Invalid(f"Укажите сумму и дату оплаты — без них сделку нельзя перевести в «{stage.name}».")
+            record_payment(db, deal, user, amount_minor, paid_on)
     old = deal.stage
     deal.stage_id = stage.id
     deal.is_open = not stage.is_closed
@@ -94,9 +132,10 @@ def _apply_stage(db: Session, deal: Deal, stage_id: int, user: User, lost_reason
     return True
 
 
-def change_stage(db: Session, deal: Deal, stage_id: int, user: User, expected_version: int | None, lost_reason: str | None = None) -> None:
+def change_stage(db: Session, deal: Deal, stage_id: int, user: User, expected_version: int | None,
+                 lost_reason: str | None = None, amount_minor: int | None = None, paid_on: date | None = None) -> None:
     _check_version(deal, expected_version)
-    _apply_stage(db, deal, stage_id, user, lost_reason)
+    _apply_stage(db, deal, stage_id, user, lost_reason, amount_minor, paid_on)
     _commit(db, deal.id)
 
 
@@ -115,7 +154,8 @@ def _apply_owner(db: Session, deal: Deal, owner: User | None, user: User) -> boo
 
 
 def change_owner(db: Session, deal: Deal, owner_id: int | None, user: User, expected_version: int | None) -> None:
-    if not user.is_head:
+    # Владелец передаёт сделку кому угодно; руководитель группы — только внутри своей группы.
+    if not user.is_boss:
         raise Forbidden()
     _check_version(deal, expected_version)
     owner = None
@@ -123,6 +163,11 @@ def change_owner(db: Session, deal: Deal, owner_id: int | None, user: User, expe
         owner = db.get(User, owner_id)
         if owner is None or not owner.is_active:
             raise Invalid("Выбранный сотрудник недоступен.")
+    if not user.is_owner:
+        if owner is None:
+            raise Invalid("Выберите ответственного из своей группы.")
+        if owner.id not in {u.id for u in assignable_users(db, user)}:
+            raise Invalid("Передать сделку можно только сотруднику своей группы.")
     _apply_owner(db, deal, owner, user)
     _commit(db, deal.id)
 
@@ -172,6 +217,8 @@ def log_touch(
     *,
     stage_id: int | None = None,
     lost_reason: str | None = None,
+    amount_minor: int | None = None,
+    paid_on: date | None = None,
     followup_due: date | None = None,
     followup_title: str | None = None,
     expected_version: int | None = None,
@@ -186,7 +233,7 @@ def log_touch(
         _check_version(deal, expected_version)
     _log(db, deal, user, kind, body)
     if stage_id:
-        _apply_stage(db, deal, stage_id, user, lost_reason)
+        _apply_stage(db, deal, stage_id, user, lost_reason, amount_minor, paid_on)
     if followup_due is not None:
         add_task(db, deal, user, followup_title or "Повторный контакт", followup_due)
     _commit(db, deal.id)
@@ -195,15 +242,19 @@ def log_touch(
 def bulk_assign(db: Session, user: User, company_ids: list[int], manager_ids: list[int]) -> dict:
     """Массовое назначение: открытые сделки выбранных компаний делятся между менеджерами по кругу.
 
-    Если у компании ещё нет сделки, она создаётся в основной воронке.
+    Владелец назначает кому угодно; если у компании ещё нет сделки, она создаётся в основной воронке.
+    Руководитель группы меняет ответственного только у сделок своей группы и только на своих сотрудников.
     """
-    if not user.is_head:
+    if not user.is_boss:
         raise Forbidden()
-    managers = [m for m in db.scalars(select(User).where(User.id.in_(manager_ids), User.is_active.is_(True)).order_by(User.id))]
+    allowed = assignable_users(db, user)
+    managers = [m for m in allowed if m.id in set(manager_ids)]
     if not managers:
         raise Invalid("Выберите хотя бы одного ответственного.")
     if not company_ids:
         raise Invalid("Не выбрано ни одной компании.")
+    # Чьи сделки пользователь вправе передавать: None — любые.
+    own_scope = None if user.is_owner else {u.id for u in allowed} | {user.id}
     default = db.scalar(select(Pipeline).where(Pipeline.is_archived.is_(False)).order_by(Pipeline.is_default.desc(), Pipeline.id))
     assigned = created = turn = 0
     ids = sorted(set(company_ids))
@@ -216,7 +267,7 @@ def bulk_assign(db: Session, user: User, company_ids: list[int], manager_ids: li
             select(Deal).where(Deal.company_id.in_(chunk)).order_by(Deal.id).execution_options(populate_existing=True)
         ):
             has_any.add(deal.company_id)
-            if deal.is_open:
+            if deal.is_open and (own_scope is None or deal.owner_id in own_scope):
                 deals_by_company.setdefault(deal.company_id, []).append(deal)
         companies = {c.id: c for c in db.scalars(select(Company).where(Company.id.in_(chunk)))}
         for cid in chunk:
@@ -225,7 +276,7 @@ def bulk_assign(db: Session, user: User, company_ids: list[int], manager_ids: li
                 continue
             manager = managers[turn % len(managers)]
             deals = deals_by_company.get(cid, [])
-            if not deals and cid not in has_any and default is not None:
+            if not deals and cid not in has_any and default is not None and user.is_owner:
                 create_deal(db, company, default, manager, user)
                 made += 1
                 done += 1

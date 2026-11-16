@@ -1,8 +1,8 @@
 """Служебные команды: python -m app.cli <команда>.
 
-  init            миграции уже применены — создать руководителя и готовую воронку
+  init            миграции уже применены — создать владельца и готовую воронку
   seed-demo       добавить демоданные (только в пустую базу)
-  create-user     создать сотрудника: create-user ЛОГИН "Имя Фамилия" ПАРОЛЬ [head|manager]
+  create-user     создать сотрудника: create-user ЛОГИН "Имя Фамилия" ПАРОЛЬ [owner|lead|manager]
   set-password    сменить пароль: set-password ЛОГИН ПАРОЛЬ
   backup [папка]  резервная копия всей базы SQLite (по умолчанию ./backups рядом с базой)
   restore ФАЙЛ    восстановить базу из копии (приложение должно быть остановлено)
@@ -31,7 +31,7 @@ def cmd_init() -> None:
         db.commit()
         if password:
             print("=" * 64)
-            print("Создан руководитель.")
+            print("Создан владелец.")
             print(f"  Логин:  {head.login}")
             print(f"  Пароль: {password}")
             print("Пароль сгенерирован, потому что ADMIN_PASSWORD не задан. Смените его после входа.")
@@ -41,7 +41,7 @@ def cmd_init() -> None:
 def cmd_seed_demo() -> None:
     with SessionLocal() as db:
         if setup.seed_demo(db):
-            print(f"Демоданные добавлены. Менеджеры: anna и boris, пароль {setup.DEMO_PASSWORD}", flush=True)
+            print(f"Демоданные добавлены. Руководитель группы: vera, менеджеры: anna и boris, пароль {setup.DEMO_PASSWORD}", flush=True)
         else:
             print("В базе уже есть компании — демоданные не добавлены.", flush=True)
 

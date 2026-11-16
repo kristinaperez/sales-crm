@@ -7,7 +7,8 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import config
-from ..models import METRICS, ROLE_MANAGER, Activity, Deal, Pipeline, Stage, Task, User
+from ..models import METRICS, ROLE_OWNER, Activity, Deal, Pipeline, Stage, Task, User
+from .access import scope_deals
 
 
 def today() -> date:
@@ -15,11 +16,10 @@ def today() -> date:
 
 
 def _scope(stmt, user: User, owner_id: int | None):
-    """Менеджер видит только своё; руководитель — всё или одного менеджера."""
-    if not user.is_head:
-        return stmt.where(Deal.owner_id == user.id)
-    if owner_id:
-        return stmt.where(Deal.owner_id == owner_id)
+    """Сначала права (свои / группа / все), затем необязательный фильтр по одному менеджеру."""
+    stmt = scope_deals(stmt, user)
+    if owner_id and user.is_boss:
+        stmt = stmt.where(Deal.owner_id == owner_id)
     return stmt
 
 
@@ -101,7 +101,7 @@ def _utc_bounds(date_from: date, date_to: date) -> tuple[datetime, datetime]:
     return start.astimezone(timezone.utc).replace(tzinfo=None), end.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def manager_report(db: Session, date_from: date, date_to: date) -> dict:
+def manager_report(db: Session, viewer: User, date_from: date, date_to: date) -> dict:
     """Сколько сделок за период перешло на этапы «первый контакт», «ответ», «демо», «оплата».
 
     Считаются уникальные сделки; событие относится к ответственному на момент перехода.
@@ -119,11 +119,17 @@ def manager_report(db: Session, date_from: date, date_to: date) -> dict:
     data: dict[int | None, dict[str, int]] = {}
     for owner_id, metric, n in rows:
         data.setdefault(owner_id, {})[metric] = n
-    users = list(db.scalars(select(User).order_by(User.role.desc(), User.name)))
+    users_stmt = select(User).order_by(User.name)
+    if not viewer.is_owner:
+        # Руководитель группы видит только свою группу и себя.
+        cond = User.id == viewer.id
+        if viewer.team_id:
+            cond = cond | (User.team_id == viewer.team_id)
+        users_stmt = users_stmt.where(cond)
     lines = []
-    for u in users:
+    for u in db.scalars(users_stmt):
         values = data.get(u.id, {})
-        if u.role != ROLE_MANAGER and not values:
+        if u.role == ROLE_OWNER and not values:
             continue
         if not u.is_active and not values:
             continue

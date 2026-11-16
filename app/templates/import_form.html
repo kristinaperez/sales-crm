@@ -2,7 +2,7 @@
 {% block title %}Импорт{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Импорт компаний</h1>
-<p class="lead">Загрузите список — перед записью вы увидите предпросмотр и сможете поправить строки.</p></div></div>
+<p class="lead">Загрузите список — перед записью вы увидите предпросмотр и сможете поправить строки. Компания закрепляется за тем, кто загрузил её первым.</p></div></div>
 {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
 <form method="post" action="/import" enctype="multipart/form-data" class="card">
   <div class="tabs">

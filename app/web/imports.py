@@ -1,4 +1,7 @@
-"""Импорт: загрузка, сопоставление колонок CSV, предпросмотр, подтверждение. Только руководитель."""
+"""Импорт: загрузка, сопоставление колонок CSV, предпросмотр, подтверждение.
+
+Загружать списки может каждый. Свои загрузки видит сам сотрудник, все — только владелец.
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
@@ -13,7 +16,6 @@ from ..models import (
     BATCH_CONFIRMING,
     BATCH_MAPPING,
     BATCH_PREVIEW,
-    ROLE_MANAGER,
     ROW_DUPLICATE,
     ROW_NEW,
     ROW_REVIEW,
@@ -25,34 +27,34 @@ from ..models import (
     User,
 )
 from ..services import importer
-from ..services.access import NotFound
+from ..services.access import NotFound, assignable_users, visible_company_ids
 from ..services.parsing import FIELDS, decode_bytes
-from .common import flash, form_data, head_user, redirect, render, to_int
+from .common import current_user, flash, form_data, redirect, render, to_int
 
 router = APIRouter()
 
 
-def _batch(db: Session, batch_id: int) -> ImportBatch:
+def _batch(db: Session, user: User, batch_id: int) -> ImportBatch:
     batch = db.get(ImportBatch, batch_id)
-    if batch is None:
+    if batch is None or (not user.is_owner and batch.user_id != user.id):
         raise NotFound()
     return batch
 
 
-def _form_ctx(db: Session, error: str | None = None, mode: str = "text", text: str = "") -> dict:
-    recent = db.scalars(
-        select(ImportBatch).options(selectinload(ImportBatch.user)).order_by(ImportBatch.id.desc()).limit(10)
-    ).all()
-    return {"recent": recent, "error": error, "mode": mode, "text": text}
+def _form_ctx(db: Session, user: User, error: str | None = None, mode: str = "text", text: str = "") -> dict:
+    stmt = select(ImportBatch).options(selectinload(ImportBatch.user)).order_by(ImportBatch.id.desc()).limit(10)
+    if not user.is_owner:
+        stmt = stmt.where(ImportBatch.user_id == user.id)
+    return {"recent": db.scalars(stmt).all(), "error": error, "mode": mode, "text": text}
 
 
 @router.get("/import")
-def import_form(request: Request, user: User = Depends(head_user), db: Session = Depends(get_db)):
-    return render(request, "import_form.html", _form_ctx(db))
+def import_form(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return render(request, "import_form.html", _form_ctx(db, user))
 
 
 @router.post("/import")
-def import_create(request: Request, form: FormData = Depends(form_data), user: User = Depends(head_user),
+def import_create(request: Request, form: FormData = Depends(form_data), user: User = Depends(current_user),
                   db: Session = Depends(get_db)):
     mode = str(form.get("mode", "text"))
     text = str(form.get("text", ""))
@@ -74,13 +76,14 @@ def import_create(request: Request, form: FormData = Depends(form_data), user: U
         batch = importer.create_text_batch(db, user, mode, name, text)
     except importer.ImportError_ as exc:
         db.rollback()
-        return render(request, "import_form.html", _form_ctx(db, str(exc), mode, text if mode in ("text", "sheets") else ""), 400)
+        ctx = _form_ctx(db, user, str(exc), mode, text if mode in ("text", "sheets") else "")
+        return render(request, "import_form.html", ctx, 400)
     return redirect(f"/import/{batch.id}")
 
 
 @router.get("/import/{batch_id}/mapping")
-def mapping_page(request: Request, batch_id: int, user: User = Depends(head_user), db: Session = Depends(get_db)):
-    batch = _batch(db, batch_id)
+def mapping_page(request: Request, batch_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    batch = _batch(db, user, batch_id)
     if batch.status != BATCH_MAPPING:
         return redirect(f"/import/{batch.id}")
     return render(request, "import_mapping.html", {"batch": batch, "csv": importer.csv_preview(batch), "fields": FIELDS, "error": None})
@@ -88,8 +91,8 @@ def mapping_page(request: Request, batch_id: int, user: User = Depends(head_user
 
 @router.post("/import/{batch_id}/mapping")
 def mapping_apply(request: Request, batch_id: int, form: FormData = Depends(form_data),
-                  user: User = Depends(head_user), db: Session = Depends(get_db)):
-    batch = _batch(db, batch_id)
+                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    batch = _batch(db, user, batch_id)
     preview = importer.csv_preview(batch)
     mapping = [str(form.get(f"col_{i}", "skip")) for i in range(preview["width"])]
     mapping = [m if m in FIELDS or m == "skip" else "skip" for m in mapping]
@@ -98,14 +101,15 @@ def mapping_apply(request: Request, batch_id: int, form: FormData = Depends(form
     except importer.ImportError_ as exc:
         db.rollback()
         preview["mapping"] = mapping
-        return render(request, "import_mapping.html", {"batch": _batch(db, batch_id), "csv": preview, "fields": FIELDS, "error": str(exc)}, 400)
+        ctx = {"batch": _batch(db, user, batch_id), "csv": preview, "fields": FIELDS, "error": str(exc)}
+        return render(request, "import_mapping.html", ctx, 400)
     return redirect(f"/import/{batch.id}")
 
 
 @router.get("/import/{batch_id}")
 def preview(request: Request, batch_id: int, status: str = "", page: int = 1,
-            user: User = Depends(head_user), db: Session = Depends(get_db)):
-    batch = _batch(db, batch_id)
+            user: User = Depends(current_user), db: Session = Depends(get_db)):
+    batch = _batch(db, user, batch_id)
     if batch.status == BATCH_MAPPING:
         return redirect(f"/import/{batch.id}/mapping")
     stmt = select(ImportRow).where(ImportRow.batch_id == batch.id)
@@ -123,19 +127,21 @@ def preview(request: Request, batch_id: int, status: str = "", page: int = 1,
         stmt.options(selectinload(ImportRow.match_company)).order_by(ImportRow.row_no)
         .limit(config.PREVIEW_PAGE_SIZE).offset((page - 1) * config.PREVIEW_PAGE_SIZE)
     ).all()
-    match_ids = [r.match_company_id for r in rows if r.match_company_id]
+    # Чьи это компании: имя ответственного показываем всем, а ссылку на карточку — только тем, кому она видна.
+    match_ids = sorted({cid for r in rows for cid in (r.match_company_id, r.company_id) if cid})
     owners: dict[int, list[str]] = {}
     if match_ids:
-        for cid, stage, owner in db.execute(
-            select(Deal.company_id, Deal.stage_id, User.name).outerjoin(User, Deal.owner_id == User.id)
+        for cid, owner in db.execute(
+            select(Deal.company_id, User.name).outerjoin(User, Deal.owner_id == User.id)
             .where(Deal.company_id.in_(match_ids))
         ):
             owners.setdefault(cid, []).append(owner or "не назначен")
     ctx = {
         "batch": batch, "rows": rows, "status": status, "page": page, "pages": pages, "total": total,
         "summary": importer.summary(db, batch.id), "owners": owners, "ROW_STATUSES": ROW_STATUSES,
+        "visible": visible_company_ids(db, user, match_ids),
         "pipelines": db.scalars(select(Pipeline).where(Pipeline.is_archived.is_(False)).order_by(Pipeline.is_default.desc(), Pipeline.id)).all(),
-        "managers": db.scalars(select(User).where(User.is_active.is_(True), User.role == ROLE_MANAGER).order_by(User.name)).all(),
+        "managers": assignable_users(db, user),
         "ROW_NEW": ROW_NEW, "ROW_DUPLICATE": ROW_DUPLICATE, "ROW_REVIEW": ROW_REVIEW,
     }
     if batch.status == BATCH_CONFIRMED:
@@ -168,8 +174,8 @@ def _back(batch_id: int, form: FormData) -> str:
 
 @router.post("/import/{batch_id}/rows")
 def save_rows(request: Request, batch_id: int, form: FormData = Depends(form_data),
-              user: User = Depends(head_user), db: Session = Depends(get_db)):
-    batch = _batch(db, batch_id)
+              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    batch = _batch(db, user, batch_id)
     try:
         bulk = str(form.get("bulk", ""))
         importer.update_rows(db, batch, _edits(form))
@@ -184,13 +190,14 @@ def save_rows(request: Request, batch_id: int, form: FormData = Depends(form_dat
 
 @router.post("/import/{batch_id}/confirm")
 def confirm(request: Request, batch_id: int, form: FormData = Depends(form_data),
-            user: User = Depends(head_user), db: Session = Depends(get_db)):
-    batch = _batch(db, batch_id)
+            user: User = Depends(current_user), db: Session = Depends(get_db)):
+    batch = _batch(db, user, batch_id)
     try:
         resume = batch.status == BATCH_CONFIRMING and form.get("resume") == "1"
         if not resume:
             importer.update_rows(db, batch, _edits(form))
-        importer.confirm(db, batch_id, user, to_int(form.get("pipeline_id")), to_int(form.get("owner_id")), resume=resume)
+        pipeline_id, owner_id = importer.resolve_target(db, user, to_int(form.get("pipeline_id")), to_int(form.get("owner_id")))
+        importer.confirm(db, batch_id, user, pipeline_id, owner_id, resume=resume)
     except importer.ImportError_ as exc:
         db.rollback()
         flash(request, str(exc), "error")
@@ -199,7 +206,7 @@ def confirm(request: Request, batch_id: int, form: FormData = Depends(form_data)
 
 
 @router.post("/import/{batch_id}/cancel")
-def cancel(request: Request, batch_id: int, user: User = Depends(head_user), db: Session = Depends(get_db)):
-    importer.cancel(db, _batch(db, batch_id))
+def cancel(request: Request, batch_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    importer.cancel(db, _batch(db, user, batch_id))
     flash(request, "Импорт отменён, карточки не созданы.", "warn")
     return redirect("/import")

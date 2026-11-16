@@ -1,4 +1,4 @@
-"""Карточка сделки и действия с ней. Доступ проверяется для каждого запроса."""
+"""Карточка сделки, оплаты и действия с ними. Доступ проверяется для каждого запроса."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import FormData
 
 from ..db import get_db
-from ..models import MANUAL_ACTIVITY_KINDS, ROLE_MANAGER, Activity, Deal, Task, User
+from ..models import MANUAL_ACTIVITY_KINDS, PAY_PENDING, Activity, Deal, Payment, Task, User
+from ..services import companies as company_svc
 from ..services import deals as svc
-from ..services.access import NotFound, get_deal, get_task
-from .common import current_user, flash, form_data, redirect, render, safe_next, to_date, to_int
+from ..services import payments as pay_svc
+from ..services.access import NotFound, assignable_users, get_deal, get_payment, get_task
+from .common import current_user, flash, form_data, owner_user, redirect, render, safe_next, to_date, to_int
 
 router = APIRouter()
 
@@ -25,7 +27,7 @@ def render_deal(request: Request, db: Session, user: User, deal_id: int, *, erro
             raise
         return render(request, "error.html", {
             "title": "Сделка передана другому менеджеру",
-            "message": "Пока вы работали с карточкой, руководитель сменил ответственного. Ваше изменение не записано.",
+            "message": "Пока вы работали с карточкой, у сделки сменился ответственный. Ваше изменение не записано.",
         }, 409)
     deal = db.scalar(
         select(Deal).where(Deal.id == deal_id).options(
@@ -41,9 +43,20 @@ def render_deal(request: Request, db: Session, user: User, deal_id: int, *, erro
         select(Task).where(Task.deal_id == deal.id).options(selectinload(Task.assignee))
         .order_by(Task.done_at.is_not(None), Task.due_date, Task.id)
     ).all()
-    managers = db.scalars(select(User).where(User.is_active.is_(True), User.role == ROLE_MANAGER).order_by(User.name)).all() if user.is_head else []
+    payments = db.scalars(
+        select(Payment).where(Payment.deal_id == deal.id)
+        .options(selectinload(Payment.credited_to), selectinload(Payment.confirmed_by))
+        .order_by(Payment.paid_on.desc(), Payment.id.desc())
+    ).all()
+    managers = assignable_users(db, user)
+    credit_options = {u.id: u for u in managers}
+    for p in payments:
+        if p.credited_to is not None:
+            credit_options.setdefault(p.credited_to.id, p.credited_to)
     return render(request, "deal.html", {
         "deal": deal, "company": deal.company, "history": history, "tasks": tasks, "managers": managers,
+        "payments": payments, "can_decide": {p.id for p in payments if p.status == PAY_PENDING and pay_svc.can_confirm(user, p)},
+        "credit_options": sorted(credit_options.values(), key=lambda u: u.name),
         "error": error, "conflict": conflict, "draft": draft or {}, "kinds": MANUAL_ACTIVITY_KINDS,
     }, status)
 
@@ -75,7 +88,8 @@ def change_stage(request: Request, deal_id: int, form: FormData = Depends(form_d
     deal = get_deal(db, user, deal_id)
     back = safe_next(str(form.get("back", "")), f"/deals/{deal_id}")
     return _run(request, db, user, deal_id, lambda: svc.change_stage(
-        db, deal, to_int(form.get("stage_id")) or 0, user, to_int(form.get("version")), str(form.get("lost_reason", ""))
+        db, deal, to_int(form.get("stage_id")) or 0, user, to_int(form.get("version")), str(form.get("lost_reason", "")),
+        pay_svc.parse_amount(form.get("amount")), to_date(form.get("paid_on")),
     ), "Этап изменён.", back=back)
 
 
@@ -101,10 +115,12 @@ def next_step(request: Request, deal_id: int, form: FormData = Depends(form_data
 def touch(request: Request, deal_id: int, form: FormData = Depends(form_data),
           user: User = Depends(current_user), db: Session = Depends(get_db)):
     deal = get_deal(db, user, deal_id)
-    draft = {k: str(form.get(k, "")) for k in ("kind", "body", "followup_due", "followup_title", "stage_id", "lost_reason")}
+    draft = {k: str(form.get(k, "")) for k in
+             ("kind", "body", "followup_due", "followup_title", "stage_id", "lost_reason", "amount", "paid_on")}
     return _run(request, db, user, deal_id, lambda: svc.log_touch(
         db, deal, user, draft["kind"], draft["body"],
         stage_id=to_int(draft["stage_id"]), lost_reason=draft["lost_reason"],
+        amount_minor=pay_svc.parse_amount(draft["amount"]), paid_on=to_date(draft["paid_on"]),
         followup_due=to_date(draft["followup_due"]), followup_title=draft["followup_title"],
         expected_version=to_int(form.get("version")),
     ), "Запись добавлена в историю.", draft=draft)
@@ -129,3 +145,60 @@ def task_done(request: Request, task_id: int, form: FormData = Depends(form_data
     svc.complete_task(db, task, user)
     flash(request, "Задача выполнена.")
     return redirect(safe_next(str(form.get("back", "")), f"/deals/{task.deal_id}"))
+
+
+@router.post("/deals/{deal_id}/payments")
+def add_payment(request: Request, deal_id: int, form: FormData = Depends(form_data),
+                user: User = Depends(current_user), db: Session = Depends(get_db)):
+    deal = get_deal(db, user, deal_id)
+    return _run(request, db, user, deal_id, lambda: pay_svc.add_payment(
+        db, deal, user, form.get("amount"), to_date(form.get("paid_on")), str(form.get("note", ""))
+    ), "Оплата внесена и ждёт подтверждения.")
+
+
+@router.post("/payments/{payment_id}/status")
+def payment_status(request: Request, payment_id: int, form: FormData = Depends(form_data),
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    payment = get_payment(db, user, payment_id)
+    back = safe_next(str(form.get("back", "")), f"/deals/{payment.deal_id}")
+    try:
+        pay_svc.set_status(db, payment, user, str(form.get("decision", "")))
+        flash(request, "Решение по оплате сохранено.")
+    except svc.Invalid as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+    return redirect(back)
+
+
+@router.post("/payments/{payment_id}/edit")
+def payment_edit(request: Request, payment_id: int, form: FormData = Depends(form_data),
+                 user: User = Depends(owner_user), db: Session = Depends(get_db)):
+    payment = get_payment(db, user, payment_id)
+    deal_id = payment.deal_id
+    try:
+        pay_svc.correct(db, payment, user, form.get("amount"), to_date(form.get("paid_on")),
+                        to_int(form.get("credited_to_id")), str(form.get("status", "")), str(form.get("note", "")))
+        flash(request, "Оплата исправлена. Что было и что стало — в истории сделки и в журнале исправлений.")
+    except svc.Invalid as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+    return redirect(f"/deals/{deal_id}#payments")
+
+
+@router.post("/payments/{payment_id}/delete")
+def payment_delete(request: Request, payment_id: int, user: User = Depends(owner_user), db: Session = Depends(get_db)):
+    payment = get_payment(db, user, payment_id)
+    deal_id = payment.deal_id
+    pay_svc.delete(db, payment, user)
+    flash(request, "Оплата удалена. Запись об этом есть в истории сделки и в журнале исправлений.", "warn")
+    return redirect(f"/deals/{deal_id}#payments")
+
+
+@router.post("/deals/{deal_id}/delete")
+def deal_delete(request: Request, deal_id: int, user: User = Depends(owner_user), db: Session = Depends(get_db)):
+    deal = get_deal(db, user, deal_id)
+    company_id = company_svc.delete_deal(db, deal, user)
+    flash(request, "Сделка удалена вместе с задачами, оплатами и историей. Запись об этом есть в журнале исправлений.", "warn")
+    return redirect(f"/companies/{company_id}")
+
+

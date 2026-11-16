@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Журнал исправлений{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Настройки</h1><p class="lead">Исправления и удаления: кто, когда, что было и что стало. Последние 500 записей.</p></div></div>
+{% set tab = 'audit' %}{% include "_settings_tabs.html" %}
+<div class="tablewrap"><table>
+  <thead><tr><th>Когда</th><th>Кто</th><th>Действие</th><th>Что</th><th>Подробности</th></tr></thead>
+  <tbody>
+  {% for e in entries %}
+  <tr><td class="nowrap">{{ e.created_at|dt }}</td><td>{{ e.user.name if e.user else '—' }}</td><td>{{ e.action }}</td>
+    <td class="nowrap">{{ e.entity }}{% if e.entity_id %} №{{ e.entity_id }}{% endif %}</td><td>{{ e.summary }}</td></tr>
+  {% else %}<tr><td colspan="5" class="empty">Исправлений пока не было.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

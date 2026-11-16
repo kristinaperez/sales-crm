@@ -36,8 +36,20 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING)
 
 
-ROLE_HEAD = "head"
-ROLE_MANAGER = "manager"
+ROLE_OWNER = "owner"  # владелец: видит и может исправить всё
+ROLE_LEAD = "lead"  # руководитель группы: сделки своей группы
+ROLE_MANAGER = "manager"  # менеджер: только свои сделки
+ROLES = {ROLE_OWNER: "Владелец", ROLE_LEAD: "Руководитель группы", ROLE_MANAGER: "Менеджер"}
+
+
+class Team(Base):
+    """Группа менеджеров. Руководитель группы — сотрудник с ролью lead в этой группе."""
+
+    __tablename__ = "teams"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class User(Base):
@@ -48,12 +60,28 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(String(300))
     role: Mapped[str] = mapped_column(String(20), default=ROLE_MANAGER)
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
+    team: Mapped[Team | None] = relationship()
+
     @property
-    def is_head(self) -> bool:
-        return self.role == ROLE_HEAD
+    def is_owner(self) -> bool:
+        return self.role == ROLE_OWNER
+
+    @property
+    def is_lead(self) -> bool:
+        return self.role == ROLE_LEAD
+
+    @property
+    def is_boss(self) -> bool:
+        """Владелец или руководитель группы — видит не только свои сделки."""
+        return self.role in (ROLE_OWNER, ROLE_LEAD)
+
+    @property
+    def role_label(self) -> str:
+        return ROLES.get(self.role, self.role)
 
 
 COMPANY_OK = "ok"
@@ -230,6 +258,58 @@ class Task(Base):
     assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id])
 
 
+PAY_PENDING = "pending"
+PAY_CONFIRMED = "confirmed"
+PAY_REJECTED = "rejected"
+PAYMENT_STATUSES = {PAY_PENDING: "Ждёт подтверждения", PAY_CONFIRMED: "Подтверждена", PAY_REJECTED: "Отклонена"}
+
+
+class Payment(Base):
+    """Оплата по сделке. В рейтинг идут только подтверждённые оплаты."""
+
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    # Сумма в копейках (целое число) — без ошибок округления.
+    amount_minor: Mapped[int] = mapped_column(Integer)
+    paid_on: Mapped[date] = mapped_column(Date, index=True)
+    note: Mapped[str | None] = mapped_column(String(500))
+    # Кому оплата засчитывается в рейтинге: ответственный за сделку в момент внесения.
+    credited_to_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default=PAY_PENDING, index=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    deal: Mapped[Deal] = relationship()
+    credited_to: Mapped[User | None] = relationship(foreign_keys=[credited_to_id])
+    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
+    confirmed_by: Mapped[User | None] = relationship(foreign_keys=[confirmed_by_id])
+
+    @property
+    def status_label(self) -> str:
+        return PAYMENT_STATUSES.get(self.status, self.status)
+
+
+class AuditLog(Base):
+    """Журнал исправлений владельца и изменений сотрудников: что было и что стало."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    action: Mapped[str] = mapped_column(String(40))
+    entity: Mapped[str] = mapped_column(String(40))
+    entity_id: Mapped[int | None] = mapped_column(Integer)
+    summary: Mapped[str] = mapped_column(Text)
+
+    user: Mapped[User | None] = relationship()
+
+
 ACTIVITY_KINDS = {
     "call": "Звонок",
     "email": "Письмо",
@@ -238,6 +318,7 @@ ACTIVITY_KINDS = {
     "stage_change": "Смена этапа",
     "owner_change": "Смена ответственного",
     "task": "Задача",
+    "payment": "Оплата",
     "import": "Импорт",
     "system": "Событие",
 }
@@ -292,6 +373,8 @@ class ImportBatch(Base):
     raw_text: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default=BATCH_PREVIEW)
     pipeline_id: Mapped[int | None] = mapped_column(ForeignKey("pipelines.id"))
+    # Кому назначаются созданные сделки (нужно, чтобы продолжить прерванный импорт).
+    deal_owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_count: Mapped[int] = mapped_column(Integer, default=0)
     review_count: Mapped[int] = mapped_column(Integer, default=0)
     skipped_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -299,7 +382,7 @@ class ImportBatch(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
-    user: Mapped[User] = relationship()
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
     rows: Mapped[list[ImportRow]] = relationship(
         back_populates="batch", cascade="all, delete-orphan", order_by="ImportRow.row_no"
     )

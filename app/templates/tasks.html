@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Мои задачи{% endblock %}
 {% block content %}
-<div class="head"><div><h1>{{ 'Задачи отдела' if user.is_head else 'Мои задачи' }}</h1><p class="lead">Сегодня {{ lists.date|d }}. Только открытые сделки.</p></div>
-{% if user.is_head %}<form method="get" action="/tasks" class="row"><input type="hidden" name="tab" value="{{ tab }}">
+<div class="head"><div><h1>{{ 'Задачи отдела' if user.is_owner else ('Задачи группы' if user.is_lead else 'Мои задачи') }}</h1><p class="lead">Сегодня {{ lists.date|d }}. Только открытые сделки.</p></div>
+{% if user.is_boss %}<form method="get" action="/tasks" class="row"><input type="hidden" name="tab" value="{{ tab }}">
   <div><label>Менеджер</label><select name="owner" onchange="this.form.submit()"><option value="">Все</option>{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if owner == m.id|string }}>{{ m.name }}</option>{% endfor %}</select></div>
   <noscript><div class="fit"><button class="btn">Показать</button></div></noscript></form>{% endif %}</div>
 
@@ -13,13 +13,13 @@
 </div>
 
 <div class="tablewrap"><table>
-  <thead><tr><th>Компания</th><th>Этап</th>{% if user.is_head %}<th>Ответственный</th>{% endif %}<th>Что сделать</th><th>Срок</th><th></th></tr></thead>
+  <thead><tr><th>Компания</th><th>Этап</th>{% if user.is_boss %}<th>Ответственный</th>{% endif %}<th>Что сделать</th><th>Срок</th><th></th></tr></thead>
   <tbody>
   {% for it in items %}
   <tr>
     <td><a href="/deals/{{ it.deal.id }}"><b>{{ it.deal.company.name }}</b></a><div class="small muted">{{ it.deal.company.city or '' }}</div></td>
     <td><span class="chip stage">{{ it.deal.stage.name }}</span></td>
-    {% if user.is_head %}<td>{{ it.deal.owner.name if it.deal.owner else 'не назначен' }}</td>{% endif %}
+    {% if user.is_boss %}<td>{{ it.deal.owner.name if it.deal.owner else 'не назначен' }}</td>{% endif %}
     <td>{% if it.type == 'none' %}<span class="muted">Нет ни следующего шага, ни задачи</span>{% else %}{{ it.title }}<div class="small muted">{{ 'задача' if it.type == 'task' else 'следующий шаг сделки' }}</div>{% endif %}</td>
     <td class="nowrap">{% if it.due %}<span class="chip {{ 'overdue' if it.due < lists.date }}">{{ it.due|d }}</span>{% else %}—{% endif %}</td>
     <td class="nowrap">

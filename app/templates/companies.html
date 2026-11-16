@@ -2,11 +2,11 @@
 {% block title %}Компании{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Компании</h1><p class="lead">Найдено: {{ total }}</p></div>
-{% if user.is_head %}<div class="actions">
-  <a class="btn" href="/companies/export.csv?{{ qs(fq) }}">Экспорт CSV</a>
+<div class="actions">
+  {% if user.is_owner %}<a class="btn" href="/companies/export.csv?{{ qs(fq) }}">Экспорт CSV</a>{% endif %}
   <a class="btn" href="/companies/new">Добавить компанию</a>
-  <a class="btn primary" href="/import">Импорт</a>
-</div>{% endif %}</div>
+  <a class="btn primary" href="/import">Загрузить список</a>
+</div></div>
 
 <form method="get" action="/companies" class="card">
   <div class="row">
@@ -16,9 +16,9 @@
     <div><label>Этап</label><select name="stage_id"><option value="">Все</option>
       {% for p in pipelines %}<optgroup label="{{ p.name }}">{% for s in p.stages %}<option value="{{ s.id }}" {{ 'selected' if f.stage_id == s.id }}>{{ s.name }}</option>{% endfor %}</optgroup>{% endfor %}
     </select></div>
-    {% if user.is_head %}
+    {% if user.is_boss %}
     <div><label>Менеджер</label><select name="owner"><option value="">Все</option>
-      <option value="none" {{ 'selected' if f.owner == 'none' }}>Без ответственного</option>
+      {% if user.is_owner %}<option value="none" {{ 'selected' if f.owner == 'none' }}>Без ответственного</option>{% endif %}
       {% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if f.owner == m.id|string }}>{{ m.name }}</option>{% endfor %}
     </select></div>
     {% endif %}
@@ -27,7 +27,7 @@
       <option value="ok" {{ 'selected' if f.status == 'ok' }}>Проверена</option></select></div>
     <div class="fit"><button class="btn primary">Показать</button> <a class="btn" href="/companies">Сбросить</a></div>
   </div>
-  {% if user.is_head %}<label class="check" style="margin-top:10px"><input type="checkbox" name="no_deal" value="1" {{ 'checked' if f.no_deal }}> Только компании без сделок</label>{% endif %}
+  {% if user.is_owner %}<label class="check" style="margin-top:10px"><input type="checkbox" name="no_deal" value="1" {{ 'checked' if f.no_deal }}> Только компании без сделок</label>{% endif %}
 </form>
 
 <form method="post" action="/companies/assign">
@@ -35,14 +35,14 @@
 {% for k, v in fq.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
 <div class="tablewrap"><table>
   <thead><tr>
-    {% if user.is_head %}<th><input type="checkbox" data-check-all="company_id" aria-label="Выбрать все на странице"></th>{% endif %}
+    {% if user.is_boss %}<th><input type="checkbox" data-check-all="company_id" aria-label="Выбрать все на странице"></th>{% endif %}
     <th>Компания</th><th>Город</th><th>Отрасль</th><th>Контакты</th><th>Этап</th><th>Ответственный</th><th>Следующий шаг</th>
   </tr></thead>
   <tbody>
   {% for c in items %}
   {% set d = deals.get(c.id) %}
   <tr>
-    {% if user.is_head %}<td><input type="checkbox" name="company_id" value="{{ c.id }}" aria-label="Выбрать {{ c.name }}"></td>{% endif %}
+    {% if user.is_boss %}<td><input type="checkbox" name="company_id" value="{{ c.id }}" aria-label="Выбрать {{ c.name }}"></td>{% endif %}
     <td><a href="/companies/{{ c.id }}"><b>{{ c.name }}</b></a>
       {% if c.status == 'needs_review' %}<span class="chip review">Нужно проверить</span>{% endif %}
       {% if c.website %}<div class="small"><a href="{{ c.website|href }}" target="_blank" rel="noopener noreferrer">{{ c.website|truncate(40) }}</a></div>{% endif %}</td>
@@ -53,7 +53,7 @@
     <td class="small">{% if d and d.next_step %}{{ d.next_step|truncate(50) }}<div class="{{ 'chip overdue' if d.next_step_due < today() else 'muted' }}">до {{ d.next_step_due|d }}</div>{% elif d and tasks.get(d.id) %}{{ tasks[d.id].title|truncate(50) }}<div class="{{ 'chip overdue' if tasks[d.id].due_date < today() else 'muted' }}">до {{ tasks[d.id].due_date|d }}</div>{% else %}—{% endif %}</td>
   </tr>
   {% else %}
-  <tr><td colspan="8" class="empty">Ничего не найдено. {% if user.is_head %}Загрузите список через «Импорт».{% else %}Здесь появятся компании, по которым вам назначены сделки.{% endif %}</td></tr>
+  <tr><td colspan="8" class="empty">Ничего не найдено. Загрузите свой список через «Импорт» — компании из него закрепятся за вами.</td></tr>
   {% endfor %}
   </tbody>
 </table></div>
@@ -66,17 +66,17 @@
 </div>
 {% endif %}
 
-{% if user.is_head and items %}
+{% if user.is_boss and items %}
 <div class="card">
   <h2>Назначить ответственных</h2>
   <div class="row">
     <div><label>Кому (если выбрать нескольких — сделки поделятся поровну)</label>
-      <div class="actions">{% for m in managers %}<label class="check"><input type="checkbox" name="manager_id" value="{{ m.id }}"> {{ m.name }}</label>{% else %}<span class="muted">Сначала добавьте менеджеров в «Настройки → Сотрудники».</span>{% endfor %}</div></div>
+      <div class="actions">{% for m in managers %}<label class="check"><input type="checkbox" name="manager_id" value="{{ m.id }}"> {{ m.name }}</label>{% else %}<span class="muted">Сначала добавьте менеджеров в разделе сотрудников.</span>{% endfor %}</div></div>
     <div><label>Какие компании</label>
       <select name="scope"><option value="selected">Отмеченные на этой странице</option><option value="all">Все найденные по фильтру ({{ total }})</option></select></div>
     <div class="fit"><button class="btn primary">Назначить</button></div>
   </div>
-  <p class="small muted" style="margin:8px 0 0">Меняется ответственный у открытых сделок. Если у компании ещё нет сделки, она создаётся в основной воронке.</p>
+  <p class="small muted" style="margin:8px 0 0">Меняется ответственный у открытых сделок.{% if user.is_owner %} Если у компании ещё нет сделки, она создаётся в основной воронке.{% else %} Передавать сделки можно внутри своей группы.{% endif %}</p>
 </div>
 {% endif %}
 </form>

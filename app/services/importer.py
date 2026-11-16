@@ -38,6 +38,7 @@ from ..models import (
     User,
     utcnow,
 )
+from .access import assignable_users
 from .normalize import classify_url, display_host, normalize_city, normalize_link, normalize_name, normalize_website
 from .parsing import ParsedRow, csv_rows, guess_field, parse_text, read_csv
 
@@ -161,8 +162,9 @@ def _sanitize(row: ImportRow) -> None:
 class _Matcher:
     """Ищет совпадения строк с базой и между собой. Состояние «уже встречалось» живёт на весь пакет."""
 
-    def __init__(self, db: Session, batch_id: int):
-        self.db, self.batch_id = db, batch_id
+    def __init__(self, db: Session, batch_id: int, user_id: int):
+        # user_id передаётся готовым: конструктор не должен читать базу до первой записи транзакции.
+        self.db, self.batch_id, self.user_id = db, batch_id, user_id
         self.seen_sites: dict[str, int] = {}
         self.seen_links: dict[str, int] = {}
         self.seen_names: dict[str, list[tuple[str, int]]] = {}
@@ -202,7 +204,7 @@ class _Matcher:
                 .where(Company.name_norm.in_(chunk)).order_by(Company.id)
             ):
                 db_names.setdefault(norm, []).append((cid, city or ""))
-        # Строки, которые пользователь исключил в уже подтверждённых импортах.
+        # Строки, которые этот же пользователь исключил в своих уже подтверждённых импортах.
         excluded_before: set[str] = set()
         for chunk in _chunks(sorted({r.raw_hash for r in rows if r.raw_hash})):
             excluded_before.update(
@@ -212,6 +214,7 @@ class _Matcher:
                     .where(
                         ImportRow.raw_hash.in_(chunk), ImportRow.result == "excluded",
                         ImportBatch.status == BATCH_CONFIRMED, ImportRow.batch_id != self.batch_id,
+                        ImportBatch.user_id == self.user_id,
                     )
                 )
             )
@@ -267,7 +270,8 @@ class _Matcher:
 def recompute(db: Session, batch_id: int) -> None:
     """Пересчитывает статусы всех строк пакета по текущему состоянию базы (для предпросмотра)."""
     rows = list(db.scalars(select(ImportRow).where(ImportRow.batch_id == batch_id).order_by(ImportRow.row_no)))
-    _Matcher(db, batch_id).match(rows)
+    user_id = db.scalar(select(ImportBatch.user_id).where(ImportBatch.id == batch_id))
+    _Matcher(db, batch_id, user_id).match(rows)
     db.flush()
 
 
@@ -418,6 +422,26 @@ def _create_chunk(db: Session, batch: ImportBatch, rows: list[ImportRow], matche
         row.result = "review" if needs_review else "created"
 
 
+def resolve_target(db: Session, user: User, pipeline_id: int | None, owner_id: int | None) -> tuple[int | None, int | None]:
+    """В какую воронку и кому попадут сделки из загрузки пользователя.
+
+    Владелец выбирает свободно (может не создавать сделки и не назначать ответственного).
+    Менеджер всегда получает сделки на себя. Руководитель группы — на себя или сотрудника группы.
+    У всех, кроме владельца, сделка создаётся обязательно: иначе компания «повисла» бы без хозяина.
+    """
+    if user.is_owner:
+        return pipeline_id, owner_id
+    pipeline = db.get(Pipeline, pipeline_id) if pipeline_id else None
+    if pipeline is None or pipeline.is_archived:
+        pipeline = db.scalar(
+            select(Pipeline).where(Pipeline.is_archived.is_(False)).order_by(Pipeline.is_default.desc(), Pipeline.id)
+        )
+    if pipeline is None:
+        raise ImportError_("В CRM нет ни одной воронки — обратитесь к владельцу.")
+    allowed = {u.id for u in assignable_users(db, user)}
+    return pipeline.id, owner_id if owner_id in allowed else user.id
+
+
 def confirm(db: Session, batch_id: int, user: User, pipeline_id: int | None, owner_id: int | None,
             resume: bool = False) -> ImportBatch:
     """Создаёт карточки короткими транзакциями по CONFIRM_CHUNK строк.
@@ -434,8 +458,8 @@ def confirm(db: Session, batch_id: int, user: User, pipeline_id: int | None, own
         db.rollback()
         raise ImportError_("Этот импорт уже подтверждён или отменён.")
     batch = db.get(ImportBatch, batch_id)
-    if resume and batch.pipeline_id and not pipeline_id:
-        pipeline_id = batch.pipeline_id
+    if resume:
+        pipeline_id, owner_id = batch.pipeline_id, batch.deal_owner_id
     pipeline = db.get(Pipeline, pipeline_id) if pipeline_id else None
     if pipeline_id and (pipeline is None or pipeline.is_archived or not pipeline.stages):
         db.rollback()
@@ -445,6 +469,8 @@ def confirm(db: Session, batch_id: int, user: User, pipeline_id: int | None, own
         db.rollback()
         raise ImportError_("Выбранный ответственный недоступен.")
     batch.pipeline_id = pipeline.id if pipeline else None
+    batch.deal_owner_id = owner.id if owner else None
+    batch_user_id = batch.user_id
     source = f"Импорт №{batch.id} · {batch.source_label}"
     row_ids = list(
         db.scalars(
@@ -453,7 +479,7 @@ def confirm(db: Session, batch_id: int, user: User, pipeline_id: int | None, own
     )
     db.commit()
 
-    matcher = _Matcher(db, batch_id)
+    matcher = _Matcher(db, batch_id, batch_user_id)
     for chunk in _chunks(row_ids, CONFIRM_CHUNK):
         for attempt in range(3):
             try:

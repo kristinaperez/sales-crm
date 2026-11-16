@@ -9,7 +9,8 @@ services:
       APP_TZ: ${APP_TZ:-Europe/Moscow}
       ADMIN_LOGIN: ${ADMIN_LOGIN:-head}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      ADMIN_NAME: ${ADMIN_NAME:-Руководитель}
+      ADMIN_NAME: ${ADMIN_NAME:-Владелец}
+      CURRENCY: ${CURRENCY:-₽}
       SECRET_KEY: ${SECRET_KEY:-}
       SEED_DEMO: ${SEED_DEMO:-0}
       SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-0}

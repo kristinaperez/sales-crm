@@ -8,7 +8,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import ROLE_HEAD, ROLE_MANAGER, STAGE_LOST, STAGE_OPEN, STAGE_WON, Deal, Pipeline, Stage, User
+from ..models import ROLE_LEAD, ROLE_MANAGER, ROLE_OWNER, ROLES, STAGE_LOST, STAGE_OPEN, STAGE_WON, Deal, Pipeline, Stage, Team, User
 from ..security import hash_password
 
 DEFAULT_PIPELINE = "Холодные продажи"
@@ -42,30 +42,47 @@ def ensure_default_pipeline(db: Session) -> Pipeline:
 
 def ensure_head(db: Session) -> tuple[User, str | None]:
     """Создаёт руководителя, если его ещё нет. Возвращает (пользователь, сгенерированный пароль или None)."""
-    head = db.scalar(select(User).where(User.role == ROLE_HEAD).order_by(User.id))
+    head = db.scalar(select(User).where(User.role == ROLE_OWNER).order_by(User.id))
     if head is not None:
         return head, None
     login = os.environ.get("ADMIN_LOGIN", "head")
     given = os.environ.get("ADMIN_PASSWORD")
     password = given or secrets.token_urlsafe(9)
-    head = User(login=login, name=os.environ.get("ADMIN_NAME", "Руководитель"), role=ROLE_HEAD, password_hash=hash_password(password))
+    head = User(login=login, name=os.environ.get("ADMIN_NAME", "Владелец"), role=ROLE_OWNER, password_hash=hash_password(password))
     db.add(head)
     db.flush()
     # Пароль возвращается для печати, только если он был сгенерирован, а не задан в окружении.
     return head, (None if given else password)
 
 
-def create_user(db: Session, login: str, name: str, password: str, role: str = ROLE_MANAGER) -> User:
+def create_team(db: Session, name: str) -> Team:
+    name = (name or "").strip()
+    if not name:
+        raise Invalid("Укажите название группы.")
+    if db.scalar(select(Team.id).where(Team.name == name)):
+        raise Invalid("Группа с таким названием уже есть.")
+    team = Team(name=name[:200])
+    db.add(team)
+    db.flush()
+    return team
+
+
+def create_user(db: Session, login: str, name: str, password: str, role: str = ROLE_MANAGER,
+                team_id: int | None = None) -> User:
     login, name = (login or "").strip().lower(), (name or "").strip()
     if not login or not name:
         raise Invalid("Укажите логин и имя.")
     if len(password or "") < 8:
         raise Invalid("Пароль должен быть не короче 8 символов.")
-    if role not in (ROLE_HEAD, ROLE_MANAGER):
+    if role not in ROLES:
         raise Invalid("Неизвестная роль.")
     if db.scalar(select(User.id).where(func.lower(User.login) == login)):
         raise Invalid("Такой логин уже занят.")
-    user = User(login=login, name=name[:200], role=role, password_hash=hash_password(password))
+    if team_id and db.get(Team, team_id) is None:
+        raise Invalid("Такой группы нет.")
+    if role == ROLE_OWNER:
+        team_id = None
+    user = User(login=login, name=name[:200], role=role, team_id=team_id or None, password_hash=hash_password(password))
     db.add(user)
     db.flush()
     return user
@@ -170,21 +187,27 @@ DEMO_LIST = """\
 
 
 def seed_demo(db: Session) -> bool:
-    """Два менеджера и восемь компаний со сделками на разных этапах. Возвращает False, если база не пустая."""
-    from ..models import Company
+    """Группа с руководителем и двумя менеджерами, восемь компаний со сделками, две оплаты.
+
+    Возвращает False, если в базе уже есть компании.
+    """
+    from ..models import PAY_CONFIRMED, Company
     from . import deals as deal_service
-    from . import importer
+    from . import importer, payments
     from .worklists import today
 
     if db.scalar(select(func.count()).select_from(Company)):
         return False
     head, _ = ensure_head(db)
     pipeline = ensure_default_pipeline(db)
-    managers = []
-    for login, name in (("anna", "Анна Смирнова"), ("boris", "Борис Орлов")):
-        user = db.scalar(select(User).where(User.login == login)) or create_user(db, login, name, DEMO_PASSWORD)
-        managers.append(user)
+    team = db.scalar(select(Team).where(Team.name == "Первая группа")) or create_team(db, "Первая группа")
+    people = {}
+    for login, name, role in (("vera", "Вера Лебедева", ROLE_LEAD), ("anna", "Анна Смирнова", ROLE_MANAGER),
+                              ("boris", "Борис Орлов", ROLE_MANAGER)):
+        people[login] = db.scalar(select(User).where(User.login == login)) or create_user(
+            db, login, name, DEMO_PASSWORD, role, team.id)
     db.commit()
+    managers = [people["anna"], people["boris"]]
 
     batch = importer.create_text_batch(db, head, "text", "демоданные", DEMO_LIST)
     importer.confirm(db, batch.id, head, pipeline.id, None)
@@ -192,9 +215,9 @@ def seed_demo(db: Session) -> bool:
     deal_service.bulk_assign(db, head, ids, [m.id for m in managers])
 
     stages = {s.name: s for s in pipeline.stages}
-    plan = ["Готова к контакту", "Первый контакт", "Есть ответ", "Демо", "Первый контакт", "Новая", "Предложение", "Есть ответ"]
+    plan = ["Готова к контакту", "Первый контакт", "Есть ответ", "Оплачено", "Первый контакт", "Новая", "Оплачено", "Есть ответ"]
     order = [s.name for s in pipeline.stages]
-    for deal, target in zip(db.scalars(select(Deal).order_by(Deal.id)).all(), plan):
+    for n, (deal, target) in enumerate(zip(db.scalars(select(Deal).order_by(Deal.id)).all(), plan)):
         owner = deal.owner or head
         for name in order[1 : order.index(target) + 1]:
             if name == "Первый контакт":
@@ -202,11 +225,15 @@ def seed_demo(db: Session) -> bool:
                     db, deal, owner, "message", "Написали в мессенджер, отправили короткое предложение",
                     stage_id=stages[name].id, expected_version=deal.version,
                 )
+            elif name == "Оплачено":
+                deal_service.change_stage(db, deal, stages[name].id, owner, deal.version,
+                                          amount_minor=(45000 + n * 5000) * 100, paid_on=today())
             else:
                 deal_service.change_stage(db, deal, stages[name].id, owner, deal.version)
         if target in ("Первый контакт", "Есть ответ"):
             deal_service.add_task(db, deal, owner, "Повторный контакт", today() + timedelta(days=(deal.id % 3) - 1))
             db.commit()
-        elif target in ("Демо", "Предложение"):
-            deal_service.set_next_step(db, deal, "Созвон по итогам демо", today() + timedelta(days=2), owner, deal.version)
+    # Одну оплату подтверждает руководитель группы, вторая остаётся ждать подтверждения.
+    first = payments.list_payments(db, head, None)[-1]
+    payments.set_status(db, first, people["vera"], PAY_CONFIRMED)
     return True

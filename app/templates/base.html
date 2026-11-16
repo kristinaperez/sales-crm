@@ -11,16 +11,18 @@
 {% if user %}
 <header class="top"><div class="in">
   <a class="brand" href="/">CRM продаж</a>
-  <a class="nav {{ 'on' if path.startswith('/tasks') }}" href="/tasks">Мои задачи</a>
+  <a class="nav {{ 'on' if path.startswith('/tasks') }}" href="/tasks">{{ 'Задачи' if user.is_boss else 'Мои задачи' }}</a>
   <a class="nav {{ 'on' if path.startswith('/pipeline') or path.startswith('/deals') }}" href="/pipeline">Воронка</a>
   <a class="nav {{ 'on' if path.startswith('/companies') }}" href="/companies">Компании</a>
-  {% if user.is_head %}
   <a class="nav {{ 'on' if path.startswith('/import') }}" href="/import">Импорт</a>
-  <a class="nav {{ 'on' if path.startswith('/reports') }}" href="/reports">Отчёт</a>
-  <a class="nav {{ 'on' if path.startswith('/settings') }}" href="/settings/pipelines">Настройки</a>
-  {% endif %}
+  <a class="nav {{ 'on' if path.startswith('/payments') }}" href="/payments">Оплаты</a>
+  <a class="nav {{ 'on' if path.startswith('/rating') }}" href="/rating">Рейтинг</a>
+  {% if user.is_boss %}<a class="nav {{ 'on' if path.startswith('/reports') }}" href="/reports">Отчёт</a>{% endif %}
+  {% if user.is_owner %}<a class="nav {{ 'on' if path.startswith('/settings') }}" href="/settings/users">Настройки</a>
+  {% elif user.is_lead %}<a class="nav {{ 'on' if path.startswith('/settings') }}" href="/settings/users">Моя группа</a>{% endif %}
+  <a class="nav {{ 'on' if path.startswith('/help') }}" href="/help">Справка</a>
   <div class="who">
-    <a href="/profile">{{ user.name }}</a><span>{{ 'руководитель' if user.is_head else 'менеджер' }}</span>
+    <a href="/profile">{{ user.name }}</a><span>{{ user.role_label|lower }}</span>
     <form method="post" action="/logout"><button>Выйти</button></form>
   </div>
 </div></header>

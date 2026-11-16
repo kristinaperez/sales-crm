@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Forbidden)
     async def _forbidden(request: Request, _exc):
-        return render(request, "error.html", {"title": "Нет доступа", "message": "Это действие доступно только руководителю."}, 403)
+        return render(request, "error.html", {"title": "Нет доступа", "message": "У вас нет прав на это действие."}, 403)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(request: Request, exc: StarletteHTTPException):

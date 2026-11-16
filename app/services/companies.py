@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import config
 from ..models import COMPANY_OK, COMPANY_REVIEW, Activity, Company, CompanyLink, Contact, Deal, User
-from .access import scope_companies
+from .access import deal_condition, scope_companies, scope_deals
 from .normalize import classify_url, normalize_city, normalize_link, normalize_name
 
 
@@ -70,11 +70,12 @@ def _filtered(user: User, f: Filters):
     elif f.owner.isdigit():
         deal_cond.append(Deal.owner_id == int(f.owner))
         use_deal = True
-    if not user.is_head:
-        deal_cond.append(Deal.owner_id == user.id)
+    scope = deal_condition(user)
+    if scope is not None:
+        deal_cond.append(scope)
     if use_deal:
         stmt = stmt.where(exists(select(Deal.id).where(*deal_cond)))
-    if f.no_deal and user.is_head:
+    if f.no_deal and user.is_owner:
         stmt = stmt.where(~exists(select(Deal.id).where(Deal.company_id == Company.id)))
     return stmt
 
@@ -89,8 +90,7 @@ def primary_deals(db: Session, user: User, company_ids: list[int]) -> dict[int, 
         .options(selectinload(Deal.stage), selectinload(Deal.owner), selectinload(Deal.pipeline))
         .order_by(Deal.is_open, Deal.id)
     )
-    if not user.is_head:
-        stmt = stmt.where(Deal.owner_id == user.id)
+    stmt = scope_deals(stmt, user)
     out: dict[int, Deal] = {}
     for deal in db.scalars(stmt):
         out[deal.company_id] = deal  # позже идут открытые и более новые
@@ -262,3 +262,37 @@ def _safe(value) -> str:
     if text[:1] in ("=", "+", "-", "@", "\t", "\r") and not text.lstrip("+-").replace(" ", "").replace("(", "").replace(")", "").replace("-", "").isdigit():
         return "'" + text
     return text
+
+
+def delete_company(db: Session, company: Company, user: User) -> None:
+    """Удаление карточки владельцем — вместе со сделками, задачами, оплатами и историей."""
+    from sqlalchemy import delete
+
+    from .access import require_owner
+    from .payments import audit
+
+    require_owner(user)
+    deals = db.scalar(select(func.count()).select_from(Deal).where(Deal.company_id == company.id)) or 0
+    audit(db, user, "удаление", "компания", company.id,
+          f"Удалена компания «{company.name}» (сайт: {company.website or '—'}), сделок: {deals}")
+    db.execute(delete(Company).where(Company.id == company.id))
+    db.commit()
+    db.expunge_all()
+
+
+def delete_deal(db: Session, deal: Deal, user: User) -> int:
+    """Удаление сделки владельцем — вместе с её задачами, оплатами и историей. Возвращает id компании."""
+    from sqlalchemy import delete
+
+    from .access import require_owner
+    from .payments import audit
+
+    require_owner(user)
+    company_id = deal.company_id
+    audit(db, user, "удаление", "сделка", deal.id,
+          f"Удалена сделка №{deal.id} компании «{deal.company.name}», этап «{deal.stage.name}», "
+          f"ответственный: {deal.owner.name if deal.owner else 'не назначен'}")
+    db.execute(delete(Deal).where(Deal.id == deal.id))
+    db.commit()
+    db.expunge_all()
+    return company_id

@@ -1,34 +1,67 @@
 {% extends "base.html" %}
 {% block title %}Сотрудники{% endblock %}
 {% block content %}
-<div class="head"><div><h1>Настройки</h1></div></div>
-<div class="tabs"><a href="/settings/pipelines">Воронки и этапы</a><a class="on" href="/settings/users">Сотрудники</a></div>
+<div class="head"><div><h1>{{ 'Настройки' if user.is_owner else 'Моя группа' }}</h1>
+{% if not user.is_owner %}<p class="lead">{{ user.team.name if user.team else 'У вас пока нет группы — её назначает владелец.' }}</p>{% endif %}</div></div>
+{% set tab = 'users' %}{% include "_settings_tabs.html" %}
+
 <div class="tablewrap"><table>
-  <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Статус</th><th>Новый пароль</th><th></th></tr></thead>
+  <thead><tr><th>Имя</th><th>Логин</th><th>Роль и группа</th><th>Статус</th><th>Новый пароль</th><th></th></tr></thead>
   <tbody>
   {% for u in users %}
+  {% set editable = user.is_owner or (u.role == 'manager' and u.id != user.id) %}
   <tr>
-    <td><form method="post" action="/settings/users/{{ u.id }}" class="row"><div><input type="text" name="name" value="{{ u.name }}"></div><div class="fit"><button class="btn sm" name="action" value="rename">Сохранить</button></div></form></td>
+    <td>{% if editable %}<form method="post" action="/settings/users/{{ u.id }}" class="row"><div><input type="text" name="name" value="{{ u.name }}"></div><div class="fit"><button class="btn sm" name="action" value="rename">Сохранить</button></div></form>{% else %}<b>{{ u.name }}</b>{% endif %}</td>
     <td>{{ u.login }}</td>
-    <td>{{ 'Руководитель' if u.is_head else 'Менеджер' }}</td>
+    <td>{% if user.is_owner %}
+      <form method="post" action="/settings/users/{{ u.id }}" class="row">
+        <div><select name="role" aria-label="Роль">{% for k, label in ROLES.items() %}<option value="{{ k }}" {{ 'selected' if u.role == k }}>{{ label }}</option>{% endfor %}</select></div>
+        <div><select name="team_id" aria-label="Группа"><option value="">Без группы</option>{% for t in teams %}<option value="{{ t.id }}" {{ 'selected' if u.team_id == t.id }}>{{ t.name }}</option>{% endfor %}</select></div>
+        <div class="fit"><button class="btn sm" name="action" value="assign">Сохранить</button></div>
+      </form>
+      {% else %}{{ u.role_label }}{% endif %}</td>
     <td>{% if u.is_active %}<span class="chip won">работает</span>{% else %}<span class="chip">отключён</span>{% endif %}</td>
-    <td><form method="post" action="/settings/users/{{ u.id }}" class="row"><div><input type="password" name="password" placeholder="от 8 символов" autocomplete="new-password"></div><div class="fit"><button class="btn sm" name="action" value="password">Сменить</button></div></form></td>
-    <td>{% if u.id != user.id %}<form method="post" action="/settings/users/{{ u.id }}"><button class="btn sm {{ 'danger' if u.is_active }}" name="action" value="toggle">{{ 'Отключить' if u.is_active else 'Включить' }}</button></form>{% endif %}</td>
+    <td>{% if editable %}<form method="post" action="/settings/users/{{ u.id }}" class="row"><div><input type="password" name="password" placeholder="от 8 символов" autocomplete="new-password"></div><div class="fit"><button class="btn sm" name="action" value="password">Сменить</button></div></form>{% endif %}</td>
+    <td>{% if editable and u.id != user.id %}<form method="post" action="/settings/users/{{ u.id }}"><button class="btn sm {{ 'danger' if u.is_active }}" name="action" value="toggle">{{ 'Отключить' if u.is_active else 'Включить' }}</button></form>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>
 </table></div>
-<div class="card" style="max-width:820px">
+
+{% if user.is_owner or user.team_id %}
+<div class="card" style="max-width:900px">
   <h2>Добавить сотрудника</h2>
   <form method="post" action="/settings/users">
     <div class="fields">
       <div><label>Имя и фамилия</label><input type="text" name="name" required></div>
       <div><label>Логин</label><input type="text" name="login" required autocomplete="off"></div>
       <div><label>Пароль (от 8 символов)</label><input type="password" name="password" required autocomplete="new-password"></div>
-      <div><label>Роль</label><select name="role"><option value="manager">Менеджер</option><option value="head">Руководитель</option></select></div>
+      {% if user.is_owner %}
+      <div><label>Роль</label><select name="role">{% for k, label in ROLES.items() %}<option value="{{ k }}" {{ 'selected' if k == 'manager' }}>{{ label }}</option>{% endfor %}</select></div>
+      <div><label>Группа</label><select name="team_id"><option value="">Без группы</option>{% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}</select></div>
+      {% endif %}
     </div>
     <button class="btn primary">Добавить</button>
+    {% if not user.is_owner %}<span class="small muted">Новый сотрудник станет менеджером вашей группы.</span>{% endif %}
   </form>
-  <p class="small muted" style="margin:10px 0 0">Отключённый сотрудник не может войти; его сделки остаются за ним, пока вы их не передадите.</p>
+  <p class="small muted" style="margin:10px 0 0">Отключённый сотрудник не может войти; его сделки остаются за ним, пока их не передадут.</p>
 </div>
+{% endif %}
+
+{% if user.is_owner %}
+<div class="card" style="max-width:900px">
+  <h2>Группы</h2>
+  <p class="small muted">Руководитель группы видит сделки всех, кто в его группе, распределяет их и подтверждает оплаты. Менеджер без группы или группа без руководителя остаются на вас.</p>
+  {% for t in teams %}
+  <form method="post" action="/settings/teams/{{ t.id }}" class="row" style="margin-bottom:8px">
+    <div><input type="text" name="name" value="{{ t.name }}" aria-label="Название группы"></div>
+    <div class="fit"><button class="btn sm">Переименовать</button></div>
+  </form>
+  {% else %}<p class="muted">Групп пока нет.</p>{% endfor %}
+  <form method="post" action="/settings/teams" class="row" style="margin-top:12px">
+    <div><input type="text" name="name" placeholder="Название новой группы"></div>
+    <div class="fit"><button class="btn">Создать группу</button></div>
+  </form>
+</div>
+{% endif %}
 {% endblock %}

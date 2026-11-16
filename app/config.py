@@ -19,6 +19,7 @@ DATABASE_URL: str = os.environ.get("DATABASE_URL") or _default_database_url()
 APP_TZ_NAME: str = os.environ.get("APP_TZ", "Europe/Moscow")
 APP_TZ = ZoneInfo(APP_TZ_NAME)
 SESSION_HTTPS_ONLY: bool = os.environ.get("SESSION_HTTPS_ONLY", "0") == "1"
+CURRENCY: str = os.environ.get("CURRENCY", "₽")
 PAGE_SIZE = 50
 PREVIEW_PAGE_SIZE = 50
 KANBAN_COLUMN_LIMIT = 40

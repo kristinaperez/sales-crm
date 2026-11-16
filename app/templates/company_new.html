@@ -2,14 +2,18 @@
 {% block title %}Новая компания{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Новая компания</h1></div></div>
-{% if error %}<div class="flash error">{{ error }} {% if dup_id %}<a href="/companies/{{ dup_id }}">Открыть её карточку</a>{% endif %}</div>{% endif %}
+{% if error %}<div class="flash error">{{ error }}
+{% if dup %}{% if dup.owners %} Она в работе у: {{ dup.owners|join(', ') }}.{% else %} Она ещё никому не назначена.{% endif %}
+{% if dup.id %} <a href="/companies/{{ dup.id }}">Открыть её карточку</a>{% endif %}{% endif %}</div>{% endif %}
 <form method="post" action="/companies/new" class="card" style="max-width:820px">
   {% include "_company_fields.html" %}
   <div class="fields">
     <div><label>Источник</label><input type="text" name="source" value="{{ data.source or '' }}" placeholder="Откуда узнали о компании"></div>
-    <div><label>Создать сделку в воронке</label><select name="pipeline_id">{% for p in pipelines %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}<option value="">Не создавать</option></select></div>
-    <div><label>Ответственный</label><select name="owner_id"><option value="">Не назначен</option>{% for m in managers %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}</select></div>
+    <div><label>Сделка в воронке</label><select name="pipeline_id">{% for p in pipelines %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}{% if user.is_owner %}<option value="">Не создавать</option>{% endif %}</select></div>
+    {% if user.is_owner %}<div><label>Ответственный</label><select name="owner_id"><option value="">Не назначен</option>{% for m in managers %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}</select></div>
+    {% elif user.is_lead %}<div><label>Ответственный</label><select name="owner_id">{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if m.id == user.id }}>{{ m.name }}</option>{% endfor %}</select></div>{% endif %}
   </div>
+  {% if not user.is_boss %}<p class="small muted">Сделка по компании будет назначена вам.</p>{% endif %}
   <button class="btn primary">Добавить</button> <a class="btn" href="/companies">Отмена</a>
 </form>
 {% endblock %}

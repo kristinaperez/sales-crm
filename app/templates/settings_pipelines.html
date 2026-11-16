@@ -2,7 +2,7 @@
 {% block title %}Воронки{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Настройки</h1></div></div>
-<div class="tabs"><a class="on" href="/settings/pipelines">Воронки и этапы</a><a href="/settings/users">Сотрудники</a></div>
+{% set tab = 'pipelines' %}{% include "_settings_tabs.html" %}
 {% for p in pipelines %}
 <div class="card">
   <form method="post" action="/settings/pipelines/{{ p.id }}" class="row" style="margin-bottom:12px">

@@ -1,0 +1,7 @@
+<div class="tabs">
+  <a class="{{ 'on' if tab == 'users' }}" href="/settings/users">Сотрудники{{ ' и группы' if user.is_owner }}</a>
+  {% if user.is_owner %}
+  <a class="{{ 'on' if tab == 'pipelines' }}" href="/settings/pipelines">Воронки и этапы</a>
+  <a class="{{ 'on' if tab == 'audit' }}" href="/settings/audit">Журнал исправлений</a>
+  {% endif %}
+</div>

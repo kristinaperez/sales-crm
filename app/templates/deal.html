@@ -21,11 +21,13 @@
       <input type="hidden" name="version" value="{{ deal.version }}">
       <div class="fields">
         <div><label>Тип</label><select name="kind">{% for k in kinds %}<option value="{{ k }}" {{ 'selected' if draft.kind == k }}>{{ ACTIVITY_KINDS[k] }}</option>{% endfor %}</select></div>
-        <div><label>Перевести на этап</label><select name="stage_id" data-lost-target="touch-lost">
+        <div><label>Перевести на этап</label><select name="stage_id" data-lost-target="touch-lost" data-won-target="touch-won">
           <option value="">Оставить «{{ deal.stage.name }}»</option>
           {% for s in deal.pipeline.stages %}{% if s.id != deal.stage_id %}<option value="{{ s.id }}" data-kind="{{ s.kind }}" {{ 'selected' if draft.stage_id == s.id|string }}>{{ s.name }}</option>{% endif %}{% endfor %}
         </select></div>
         <div id="touch-lost" class="hidden"><label>Причина отказа</label><input type="text" name="lost_reason" value="{{ draft.lost_reason or '' }}"></div>
+        <div id="touch-won" class="hidden"><label>Сумма оплаты, {{ CURRENCY }}</label><input type="text" name="amount" inputmode="decimal" value="{{ draft.amount or '' }}" placeholder="45000">
+          <label style="margin-top:6px">Дата оплаты</label><input type="date" name="paid_on" value="{{ draft.paid_on or today().isoformat() }}"></div>
         <div class="wide"><label>Результат: что написали или сказали, что ответил клиент</label><textarea name="body" rows="3" required>{{ draft.body or '' }}</textarea></div>
         <div><label>Повторный контакт — дата</label><input type="date" name="followup_due" value="{{ draft.followup_due or '' }}"></div>
         <div><label>Что сделать при повторном контакте</label><input type="text" name="followup_title" value="{{ draft.followup_title or '' }}" placeholder="Повторный контакт"></div>
@@ -61,10 +63,15 @@
     <form method="post" action="/deals/{{ deal.id }}/stage">
       <input type="hidden" name="version" value="{{ deal.version }}">
       <div class="row">
-        <div><select name="stage_id" data-lost-target="stage-lost">{% for s in deal.pipeline.stages %}<option value="{{ s.id }}" data-kind="{{ s.kind }}" {{ 'selected' if s.id == deal.stage_id }}>{{ s.name }}</option>{% endfor %}</select></div>
+        <div><select name="stage_id" data-lost-target="stage-lost" data-won-target="stage-won" data-current="{{ deal.stage_id }}">{% for s in deal.pipeline.stages %}<option value="{{ s.id }}" data-kind="{{ s.kind }}" {{ 'selected' if s.id == deal.stage_id }}>{{ s.name }}</option>{% endfor %}</select></div>
         <div class="fit"><button class="btn">Сменить этап</button></div>
       </div>
       <div id="stage-lost" class="hidden" style="margin-top:8px"><label>Причина отказа</label><input type="text" name="lost_reason" value="{{ deal.lost_reason or '' }}"></div>
+      <div id="stage-won" class="hidden" style="margin-top:8px">
+        <div class="row"><div><label>Сумма оплаты, {{ CURRENCY }}</label><input type="text" name="amount" inputmode="decimal" placeholder="45000"></div>
+        <div><label>Дата оплаты</label><input type="date" name="paid_on" value="{{ today().isoformat() }}"></div></div>
+        <p class="small muted" style="margin:6px 0 0">{% if payments %}По сделке уже есть оплата — сумму можно не заполнять.{% else %}Оплата попадёт в рейтинг после подтверждения.{% endif %}</p>
+      </div>
     </form>
     {% if deal.lost_reason %}<p class="small" style="margin:10px 0 0">Причина отказа: {{ deal.lost_reason }}</p>{% endif %}
   </div>
@@ -82,12 +89,57 @@
     </form>
   </div>
 
-  {% if user.is_head %}
+  <div class="card" id="payments">
+    <h2>Оплаты</h2>
+    {% for p in payments %}
+    <div style="padding:8px 0;border-bottom:1px solid #eef0f3">
+      <div class="row" style="align-items:center">
+        <div><b>{{ p.amount_minor|money }}</b> <span class="muted">от {{ p.paid_on|d }}</span>
+          <div class="small muted">засчитана: {{ p.credited_to.name if p.credited_to else '—' }}{% if p.note %} · {{ p.note }}{% endif %}</div></div>
+        <div class="fit"><span class="chip pay-{{ p.status }}">{{ p.status_label }}</span>
+          {% if p.confirmed_by %}<div class="small muted">{{ p.confirmed_by.name }}</div>{% endif %}</div>
+      </div>
+      {% if p.id in can_decide %}
+      <form method="post" action="/payments/{{ p.id }}/status" class="actions" style="margin-top:6px">
+        <button class="btn sm primary" name="decision" value="confirmed">Подтвердить</button>
+        <button class="btn sm danger" name="decision" value="rejected" data-confirm="Отклонить оплату? Она не попадёт в рейтинг.">Отклонить</button>
+      </form>
+      {% endif %}
+      {% if user.is_owner %}
+      <details style="margin-top:6px"><summary class="small">Исправить оплату</summary>
+        <form method="post" action="/payments/{{ p.id }}/edit" style="margin-top:8px">
+          <div class="fields">
+            <div><label>Сумма, {{ CURRENCY }}</label><input type="text" name="amount" inputmode="decimal" value="{{ p.amount_minor|amount }}"></div>
+            <div><label>Дата оплаты</label><input type="date" name="paid_on" value="{{ p.paid_on.isoformat() }}"></div>
+            <div><label>Кому засчитана</label><select name="credited_to_id">{% for m in credit_options %}<option value="{{ m.id }}" {{ 'selected' if m.id == p.credited_to_id }}>{{ m.name }}</option>{% endfor %}</select></div>
+            <div><label>Статус</label><select name="status">{% for k, label in PAYMENT_STATUSES.items() %}<option value="{{ k }}" {{ 'selected' if k == p.status }}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="wide"><label>Комментарий</label><input type="text" name="note" value="{{ p.note or '' }}"></div>
+          </div>
+          <div class="actions"><button class="btn sm primary">Сохранить исправление</button>
+          <button class="btn sm danger" formaction="/payments/{{ p.id }}/delete" data-confirm="Удалить оплату {{ p.amount_minor|money }}? Она исчезнет из рейтинга.">Удалить оплату</button></div>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+    {% else %}<p class="muted">Оплат пока нет.</p>{% endfor %}
+    <details style="margin-top:10px"><summary>Добавить оплату</summary>
+    <form method="post" action="/deals/{{ deal.id }}/payments" style="margin-top:8px">
+      <div class="fields">
+        <div><label>Сумма, {{ CURRENCY }}</label><input type="text" name="amount" inputmode="decimal" required placeholder="45000"></div>
+        <div><label>Дата оплаты</label><input type="date" name="paid_on" value="{{ today().isoformat() }}" required></div>
+        <div class="wide"><label>Комментарий</label><input type="text" name="note" placeholder="Например: первый платёж из двух"></div>
+      </div>
+      <button class="btn sm">Внести оплату</button>
+      <span class="small muted">В рейтинг она попадёт после подтверждения.</span>
+    </form></details>
+  </div>
+
+  {% if user.is_boss %}
   <div class="card">
     <h2>Ответственный</h2>
     <form method="post" action="/deals/{{ deal.id }}/owner" class="row">
       <input type="hidden" name="version" value="{{ deal.version }}">
-      <div><select name="owner_id"><option value="">Не назначен</option>{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if m.id == deal.owner_id }}>{{ m.name }}</option>{% endfor %}</select></div>
+      <div><select name="owner_id">{% if user.is_owner %}<option value="">Не назначен</option>{% endif %}{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if m.id == deal.owner_id }}>{{ m.name }}</option>{% endfor %}</select></div>
       <div class="fit"><button class="btn">Передать</button></div>
     </form>
   </div>
@@ -108,6 +160,13 @@
     </dl>
     <p style="margin:10px 0 0"><a href="/companies/{{ company.id }}">Изменить данные или добавить контактное лицо →</a></p>
   </div>
+  {% if user.is_owner %}
+  <div class="card">
+    <h2>Удалить сделку</h2>
+    <p class="small muted">Удаляются сделка, её задачи, оплаты и история. Карточка компании остаётся.</p>
+    <form method="post" action="/deals/{{ deal.id }}/delete"><button class="btn danger" data-confirm="Удалить сделку вместе с оплатами и историей?">Удалить сделку</button></form>
+  </div>
+  {% endif %}
 </div>
 </div>
 {% endblock %}

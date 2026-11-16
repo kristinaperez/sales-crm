@@ -2,7 +2,7 @@
 {% block title %}Отчёт{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Результаты менеджеров</h1>
-<p class="lead">Сколько сделок за период перешло на этап. Событие относится к тому, кто был ответственным в момент перехода.</p></div>
+<p class="lead">{{ 'Весь отдел' if user.is_owner else 'Ваша группа' }}: сколько сделок за период перешло на этап. Событие относится к тому, кто был ответственным в момент перехода.</p></div>
 <form method="get" action="/reports" class="row">
   <div><label>С</label><input type="date" name="date_from" value="{{ report.date_from.isoformat() }}"></div>
   <div><label>По</label><input type="date" name="date_to" value="{{ report.date_to.isoformat() }}"></div>
@@ -18,5 +18,5 @@
   {% if report.lines %}<tr><td><b>Всего</b></td>{% for key in METRICS %}<td class="num"><b>{{ report.totals[key] }}</b></td>{% endfor %}</tr>{% endif %}
   </tbody>
 </table></div>
-<p class="small muted">Какой этап считать первым контактом, ответом, демо и оплатой, задаётся в «Настройки → Воронки».</p>
+<p class="small muted">Здесь считаются переходы по этапам. Деньги и места — в разделе <a href="/rating">«Рейтинг»</a>: там учитываются только подтверждённые оплаты.</p>
 {% endblock %}

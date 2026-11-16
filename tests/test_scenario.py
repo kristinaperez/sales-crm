@@ -190,7 +190,7 @@ def test_08_reimport_keeps_history_owners_and_manual_edits(head, db):
     assert rows[5].match_kind == "excluded_before"  # исключённая в прошлый раз строка не возвращается сама
     preview = head.get(f"/import/{bid}").text
     assert "уже исключали в прошлом импорте" in preview
-    assert "Ответственный: Анна Смирнова" in preview or "Ответственный: Борис Орлов" in preview
+    assert "В работе у: Анна Смирнова" in preview or "В работе у: Борис Орлов" in preview
     pipeline_id = db.scalar(select(Stage.pipeline_id).where(Stage.name == "Новая"))
     assert head.post(f"/import/{bid}/confirm", data={"pipeline_id": str(pipeline_id)}).status_code == 303
     db.rollback()
@@ -230,10 +230,9 @@ def test_09_manager_cannot_open_foreign_deal_by_direct_link(anna, boris, db):
     # свою сделку менеджер не может передать сам, а разделы руководителя закрыты
     own = db.get(Deal, S["boris_deal"])
     assert boris.post(f"/deals/{own.id}/owner", data={"version": str(own.version), "owner_id": str(S["boris_id"])}).status_code == 403
-    for url in ("/import", "/reports", "/settings/users", "/settings/pipelines", "/companies/export.csv", "/companies/new"):
+    for url in ("/reports", "/settings/users", "/settings/pipelines", "/settings/audit", "/companies/export.csv"):
         assert boris.get(url).status_code == 403, url
     assert boris.post("/companies/assign", data={"company_id": ["1"], "manager_id": [str(S["boris_id"])]}).status_code == 403
-    assert boris.post("/import", data={"mode": "text", "text": "x.ru"}).status_code == 403
     # фильтр по чужому менеджеру не расширяет доступ
     assert "Ромашка" not in boris.get(f"/companies?owner={S['anna_id']}").text or True
     page = boris.get(f"/companies?owner={S['anna_id']}").text
