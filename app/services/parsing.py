@@ -82,14 +82,19 @@ def guess_field(header: str) -> str | None:
 
 # --- Извлечение сущностей -----------------------------------------------------------------
 
-_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", re.UNICODE)
+# Все повторы ограничены сверху: на длинной строке без разделителей разбор остаётся линейным.
+LINE_MAX = 1000  # символов в одной строке списка или ячейке; остальное отбрасывается
+NOTE_MAX = 2000
+MAX_ROWS = 10_000
+MAX_CELLS = 40  # колонок в строке таблицы
+_EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}", re.UNICODE)
 _URL_RE = re.compile(r"https?://[^\s<>\"'|\]]+", re.IGNORECASE)
 _BARE_RE = re.compile(
-    r"(?<![@\w.-])((?:[a-zа-яё0-9][a-zа-яё0-9-]*\.)+(?:" + BARE_TLDS + r"))(?![\w-])(/[^\s<>\"'|\],;]*)?",
+    r"(?<![@\w.-])((?:[a-zа-яё0-9][a-zа-яё0-9-]{0,62}\.){1,8}(?:" + BARE_TLDS + r"))(?![\w-])(/[^\s<>\"'|\],;]*)?",
     re.IGNORECASE,
 )
 _PHONE_RE = re.compile(r"(?<![\w.])(\+?\d[\d\s\-()]{8,18}\d)(?!\w)")
-_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+_MD_LINK_RE = re.compile(r"\[([^\]\[]{1,300})\]\(([^)\s]{1,1000})\)")
 _LIST_MARK_RE = re.compile(r"^\s*(?:\d{1,4}[.)]|[-*•·–—▪●◦✅➡→>]+)\s+")
 _HANDLE_RE = re.compile(r"^@([A-Za-z0-9_]{4,})$")
 _SEP = " \x1f "
@@ -126,6 +131,8 @@ def add_url(row: ParsedRow, url: str) -> None:
             return
     elif kind == "messenger" and not row.messenger_url:
         row.messenger_url = url
+        return
+    if len(row.links) >= 20:
         return
     key = normalize_link(url)
     if key == normalize_link(row.messenger_url or "\x00"):
@@ -177,7 +184,9 @@ def _extract(row: ParsedRow, text: str) -> str:
 
 
 def _append_note(row: ParsedRow, text: str) -> None:
-    text = text.strip(" ,;.-—–")
+    text = text.strip(" ,;.-—–")[:NOTE_MAX]
+    if len(row.note) >= NOTE_MAX:
+        return
     if text and text.lower() not in row.note.lower():
         row.note = f"{row.note}; {text}" if row.note else text
 
@@ -378,7 +387,7 @@ def _table_cells(line: str) -> list[str]:
         line = line[1:]
     if line.endswith("|"):
         line = line[:-1]
-    return [c.strip() for c in re.split(r"(?<!\\)\|", line)]
+    return [c.strip() for c in re.split(r"(?<!\\)\|", line)][:MAX_CELLS]
 
 
 def _is_header(cells: list[str]) -> bool:
@@ -408,8 +417,10 @@ def parse_text(text: str, tabular: bool = False) -> list[ParsedRow]:
     tsv_mapping: list[tuple[str | None, str]] | None = None
     in_table = False
 
-    lines = text.split("\n")
+    lines = [line[:LINE_MAX] for line in text.split("\n")]
     for idx, line in enumerate(lines):
+        if len(rows) > MAX_ROWS:
+            break  # дальше разбирать незачем: импорт всё равно будет отклонён по лимиту строк
         if not line.strip():
             in_table = False
             continue
@@ -438,7 +449,7 @@ def parse_text(text: str, tabular: bool = False) -> list[ParsedRow]:
 
         # Диапазон из таблицы (табуляция)
         if "\t" in line or tabular:
-            cells = [c.strip() for c in line.split("\t")]
+            cells = [c.strip() for c in line.split("\t")][:MAX_CELLS]
             if tsv_mapping is None and _is_header(cells):
                 tsv_mapping = [(guess_field(c), c) for c in cells]
                 continue
@@ -497,6 +508,10 @@ def decode_bytes(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+class CsvError(ValueError):
+    """Файл не читается как CSV."""
+
+
 def read_csv(text: str) -> list[list[str]]:
     text = text.replace("﻿", "")
     sample = text[:8192]
@@ -506,8 +521,12 @@ def read_csv(text: str) -> list[list[str]]:
     except csv.Error:
         first = sample.split("\n", 1)[0]
         delimiter = max(",;\t|", key=first.count)
-    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-    return [[c.strip() for c in r] for r in reader if any(c.strip() for c in r)]
+    csv.field_size_limit(2_000_000)
+    try:
+        reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
+        return [[c.strip()[:LINE_MAX] for c in r[:MAX_CELLS]] for r in reader if any(c.strip() for c in r)]
+    except csv.Error as exc:
+        raise CsvError("Файл не получилось прочитать как CSV: проверьте кавычки и разделители или сохраните его заново из таблицы.") from exc
 
 
 def csv_rows(table: list[list[str]], mapping: list[str | None], has_header: bool) -> list[ParsedRow]:

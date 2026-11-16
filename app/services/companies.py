@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from .. import config
 from ..models import COMPANY_OK, COMPANY_REVIEW, Activity, Company, CompanyLink, Contact, Deal, User
 from .access import deal_condition, scope_companies, scope_deals
-from .normalize import classify_url, normalize_city, normalize_link, normalize_name
+from .normalize import classify_url, is_web_url, normalize_city, normalize_link, normalize_name
 
 
 class Invalid(Exception):
@@ -149,7 +149,7 @@ def apply_fields(db: Session, company: Company, data: dict) -> None:
         norm = value
         other = db.scalar(select(Company).where(Company.website_norm == norm, Company.id != (company.id or 0)))
         if other is not None:
-            raise Invalid(f"Компания с таким сайтом уже есть: «{other.name}».", other.id)
+            raise Invalid("Компания с таким сайтом уже есть в базе.", other.id)
     company.name = name[:300]
     company.name_norm = normalize_name(name)
     company.website = website[:500] or None
@@ -159,7 +159,10 @@ def apply_fields(db: Session, company: Company, data: dict) -> None:
     company.industry = (data.get("industry") or "").strip()[:200] or None
     company.phone = (data.get("phone") or "").strip()[:100] or None
     company.email = (data.get("email") or "").strip()[:200] or None
-    company.messenger_url = (data.get("messenger_url") or "").strip()[:500] or None
+    messenger = (data.get("messenger_url") or "").strip()[:500]
+    if messenger and not is_web_url(messenger):
+        raise Invalid("Ссылка на мессенджер должна начинаться с https://, например https://t.me/username.")
+    company.messenger_url = messenger or None
     company.note = (data.get("note") or "").strip() or None
     if "source" in data:
         company.source = (data.get("source") or "").strip()[:300] or None

@@ -64,12 +64,16 @@ def add_payment(db: Session, deal: Deal, user: User, amount_raw, paid_on: date |
 
 
 def can_confirm(user: User, payment: Payment) -> bool:
-    """Владелец — любую. Руководитель группы — оплаты своих сотрудников, но не собственные."""
+    """Владелец — любую. Руководитель группы — только оплаты менеджеров своей группы.
+
+    Оплаты самих руководителей (свои и коллег по группе) подтверждает владелец.
+    """
     if user.is_owner:
         return True
-    if not user.is_lead or not user.team_id or payment.credited_to_id == user.id:
+    if not user.is_lead or not user.team_id or payment.credited_to is None:
         return False
-    return payment.credited_to is not None and payment.credited_to.team_id == user.team_id
+    target = payment.credited_to
+    return target.id != user.id and target.role == ROLE_MANAGER and target.team_id == user.team_id
 
 
 def set_status(db: Session, payment: Payment, user: User, status: str) -> None:
@@ -81,10 +85,16 @@ def set_status(db: Session, payment: Payment, user: User, status: str) -> None:
         raise Invalid("По этой оплате решение уже принято. Изменить его может только владелец.")
     if payment.status == status:
         return
+    previous = payment.status_label.lower()
+    redecided = payment.status != PAY_PENDING
     payment.status = status
     payment.confirmed_by_id, payment.confirmed_at = user.id, utcnow()
     verb = "подтверждена" if status == PAY_CONFIRMED else "отклонена"
     _log(db, payment, user, f"Оплата {format_money(payment.amount_minor)} от {payment.paid_on.strftime('%d.%m.%Y')} {verb}")
+    if redecided:
+        db.flush()
+        audit(db, user, "исправление", "оплата", payment.id,
+              f"Сделка №{payment.deal_id} ({payment.deal.company.name}). Решение изменено: было «{previous}», стало «{verb}»")
     db.commit()
 
 

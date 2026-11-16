@@ -4,7 +4,7 @@
 <div class="head"><div><h1>Новая компания</h1></div></div>
 {% if error %}<div class="flash error">{{ error }}
 {% if dup %}{% if dup.owners %} Она в работе у: {{ dup.owners|join(', ') }}.{% else %} Она ещё никому не назначена.{% endif %}
-{% if dup.id %} <a href="/companies/{{ dup.id }}">Открыть её карточку</a>{% endif %}{% endif %}</div>{% endif %}
+{% if dup.id %} <a href="/companies/{{ dup.id }}">Открыть карточку «{{ dup.name }}»</a>{% endif %}{% endif %}</div>{% endif %}
 <form method="post" action="/companies/new" class="card" style="max-width:820px">
   {% include "_company_fields.html" %}
   <div class="fields">

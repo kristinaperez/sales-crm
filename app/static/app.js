@@ -36,6 +36,11 @@ document.addEventListener('DOMContentLoaded', function () {
     sel.addEventListener('change', sync); sync();
   });
 
+  // Фильтры, которые применяются сразу при выборе
+  document.querySelectorAll('[data-autosubmit]').forEach(function (el) {
+    el.addEventListener('change', function () { el.form.submit(); });
+  });
+
   // Подтверждения
   document.querySelectorAll('[data-confirm]').forEach(function (el) {
     el.addEventListener('click', function (e) { if (!window.confirm(el.dataset.confirm)) e.preventDefault(); });

@@ -24,7 +24,7 @@ PAGE_SIZE = 50
 PREVIEW_PAGE_SIZE = 50
 KANBAN_COLUMN_LIMIT = 40
 MAX_IMPORT_ROWS = 10_000
-MAX_IMPORT_BYTES = 8 * 1024 * 1024
+MAX_IMPORT_BYTES = 2 * 1024 * 1024  # 10 000 строк по 200 символов
 
 
 def sqlite_path() -> Path | None:

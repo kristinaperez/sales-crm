@@ -42,7 +42,9 @@ def _duplicate(db: Session, user: User, company_id: int | None) -> dict | None:
     owners = sorted({name or "не назначен" for (name,) in db.execute(
         select(User.name).select_from(Deal).outerjoin(User, Deal.owner_id == User.id).where(Deal.company_id == company_id)
     )})
-    return {"id": company_id if company_id in visible_company_ids(db, user, [company_id]) else None, "owners": owners}
+    visible = company_id in visible_company_ids(db, user, [company_id])
+    return {"id": company_id if visible else None, "owners": owners,
+            "name": db.scalar(select(Company.name).where(Company.id == company_id)) if visible else None}
 
 
 @router.get("/companies")

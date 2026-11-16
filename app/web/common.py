@@ -72,7 +72,8 @@ def redirect(url: str) -> RedirectResponse:
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     uid = request.session.get("uid")
     user = db.get(User, uid) if uid else None
-    if user is None or not user.is_active or request.session.get("pv") != user.password_hash[-10:]:
+    if (user is None or not user.is_active or request.session.get("pv") != user.password_hash[-10:]
+            or request.session.get("sn") != user.session_nonce):
         request.session.clear()
         raise LoginRequired()
     request.state.user = user
@@ -97,17 +98,20 @@ async def form_data(request: Request) -> FormData:
 
 
 def to_int(value) -> int | None:
+    """Целое из формы или адреса; мусор и числа вне диапазона идентификаторов — None."""
     try:
-        return int(str(value).strip())
+        number = int(str(value).strip()[:20])
     except (TypeError, ValueError):
         return None
+    return number if 0 <= number < 2**62 else None
 
 
 def to_date(value) -> date | None:
     try:
-        return date.fromisoformat(str(value).strip())
+        parsed = date.fromisoformat(str(value).strip()[:10])
     except (TypeError, ValueError):
         return None
+    return parsed if 2000 <= parsed.year <= 2100 else None
 
 
 def safe_next(url: str | None, default: str) -> str:

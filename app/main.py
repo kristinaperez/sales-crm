@@ -24,13 +24,17 @@ def create_app() -> FastAPI:
         """Защита от CSRF: изменяющие запросы принимаются только со страниц самого приложения."""
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             source = request.headers.get("origin") or request.headers.get("referer")
-            hosts = {request.headers.get("host"), request.headers.get("x-forwarded-host")}
-            if not source or urlsplit(source).netloc not in hosts:
+            if not source or urlsplit(source).netloc != request.headers.get("host"):
                 return PlainTextResponse("Запрос отклонён: он пришёл не со страницы CRM.", status_code=403)
         response = await call_next(request)
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+        )
         if not request.url.path.startswith("/static"):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
@@ -68,6 +72,11 @@ def create_app() -> FastAPI:
         if exc.status_code == 404:
             return render(request, "error.html", {"title": "Не найдено", "message": "Такой страницы нет или у вас нет к ней доступа."}, 404)
         return render(request, "error.html", {"title": f"Ошибка {exc.status_code}", "message": str(exc.detail)}, exc.status_code)
+
+    @app.exception_handler(OverflowError)
+    async def _overflow(request: Request, _exc):
+        # Число в адресе, которое не помещается в идентификатор: такой записи заведомо нет.
+        return render(request, "error.html", {"title": "Не найдено", "message": "Такой страницы нет или у вас нет к ней доступа."}, 404)
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():

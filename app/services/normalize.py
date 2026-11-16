@@ -84,6 +84,8 @@ def classify_url(raw: str) -> tuple[str, str]:
     Возвращает (kind, value): kind ∈ website | messenger | social | map | catalog | invalid.
     Для website value — нормализованный хост (ключ дублей); для остальных — исходная ссылка.
     """
+    if not is_web_url(raw):
+        return "invalid", (raw or "").strip()
     host, path, _query = _split(raw)
     if not host or not _HOST_RE.match(host):
         return "invalid", raw.strip()
@@ -115,11 +117,27 @@ def normalize_link(raw: str) -> str:
     return (_ascii_host(host) + path.rstrip("/")).lower()
 
 
+_SCHEME_RE = re.compile(r"^\s*([a-z][a-z0-9+.-]*):", re.IGNORECASE)
+
+
+def is_web_url(raw: str | None) -> bool:
+    """Ссылкой считается только http(s) или адрес без схемы; javascript:, data: и прочее — нет."""
+    m = _SCHEME_RE.match(raw or "")
+    if m is None:
+        return True
+    scheme = m.group(1).lower()
+    # «example.ru:8080» — это хост с портом, а не схема.
+    return scheme in ("http", "https") or "." in scheme
+
+
 def ensure_scheme(raw: str) -> str:
+    """Адрес для атрибута href: всегда http(s). Всё остальное превращается в безвредную «#»."""
     raw = (raw or "").strip()
     if not raw:
         return ""
-    return raw if re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.IGNORECASE) else "https://" + raw
+    if not is_web_url(raw):
+        return "#"
+    return raw if re.match(r"^https?://", raw, re.IGNORECASE) else "https://" + raw
 
 
 _LEGAL_FORMS = re.compile(

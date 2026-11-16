@@ -3,7 +3,7 @@
 {% block content %}
 <div class="head"><div><h1>{{ 'Задачи отдела' if user.is_owner else ('Задачи группы' if user.is_lead else 'Мои задачи') }}</h1><p class="lead">Сегодня {{ lists.date|d }}. Только открытые сделки.</p></div>
 {% if user.is_boss %}<form method="get" action="/tasks" class="row"><input type="hidden" name="tab" value="{{ tab }}">
-  <div><label>Менеджер</label><select name="owner" onchange="this.form.submit()"><option value="">Все</option>{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if owner == m.id|string }}>{{ m.name }}</option>{% endfor %}</select></div>
+  <div><label>Менеджер</label><select name="owner" data-autosubmit><option value="">Все</option>{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if owner == m.id|string }}>{{ m.name }}</option>{% endfor %}</select></div>
   <noscript><div class="fit"><button class="btn">Показать</button></div></noscript></form>{% endif %}</div>
 
 <div class="tabs">

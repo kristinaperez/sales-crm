@@ -62,6 +62,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), default=ROLE_MANAGER)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Меняется при выходе: все ранее выданные cookie сессии перестают действовать.
+    session_nonce: Mapped[str | None] = mapped_column(String(40))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     team: Mapped[Team | None] = relationship()

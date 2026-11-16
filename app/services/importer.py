@@ -40,7 +40,7 @@ from ..models import (
 )
 from .access import assignable_users
 from .normalize import classify_url, display_host, normalize_city, normalize_link, normalize_name, normalize_website
-from .parsing import ParsedRow, csv_rows, guess_field, parse_text, read_csv
+from .parsing import CsvError, ParsedRow, csv_rows, guess_field, parse_text, read_csv
 
 EDITABLE = ("name", "website", "city", "industry", "phone", "email", "messenger_url", "note")
 
@@ -79,11 +79,25 @@ def _store_rows(db: Session, batch: ImportBatch, parsed: list[ParsedRow]) -> Non
     recompute(db, batch.id)
 
 
-def create_text_batch(db: Session, user: User, kind: str, source_name: str | None, text: str) -> ImportBatch:
-    """Вставка текста, TXT-файл или диапазон Google Таблиц."""
+def parse_list(kind: str, text: str) -> list[ParsedRow]:
+    """Разбор списка — чистая функция без базы: её вызывают до того, как взята блокировка записи."""
     if not (text or "").strip():
         raise ImportError_("Список пустой — вставьте текст или выберите файл.")
-    parsed = parse_text(text, tabular=(kind == "sheets"))  # разбор — до начала записи в базу
+    return parse_text(text, tabular=(kind == "sheets"))
+
+
+def parse_csv(text: str, mapping: list[str], has_header: bool) -> list[ParsedRow]:
+    try:
+        return csv_rows(read_csv(text or ""), [m or "note" for m in mapping], has_header)
+    except CsvError as exc:
+        raise ImportError_(str(exc)) from exc
+
+
+def create_text_batch(db: Session, user: User, kind: str, source_name: str | None, text: str,
+                      parsed: list[ParsedRow] | None = None) -> ImportBatch:
+    """Вставка текста, TXT-файл или диапазон Google Таблиц."""
+    if parsed is None:
+        parsed = parse_list(kind, text)
     batch = ImportBatch(user_id=user.id, source_kind=kind, source_name=source_name, raw_text=text, status=BATCH_PREVIEW)
     db.add(batch)
     db.flush()
@@ -94,7 +108,10 @@ def create_text_batch(db: Session, user: User, kind: str, source_name: str | Non
 
 def create_csv_batch(db: Session, user: User, source_name: str | None, text: str) -> ImportBatch:
     """CSV: сначала шаг сопоставления колонок."""
-    table = read_csv(text)
+    try:
+        table = read_csv(text)
+    except CsvError as exc:
+        raise ImportError_(str(exc)) from exc
     if not table:
         raise ImportError_("В CSV-файле нет строк.")
     batch = ImportBatch(user_id=user.id, source_kind="csv", source_name=source_name, raw_text=text, status=BATCH_MAPPING)
@@ -123,13 +140,14 @@ def csv_preview(batch: ImportBatch) -> dict:
     }
 
 
-def apply_csv_mapping(db: Session, batch: ImportBatch, mapping: list[str], has_header: bool) -> None:
+def apply_csv_mapping(db: Session, batch: ImportBatch, mapping: list[str], has_header: bool,
+                      parsed: list[ParsedRow] | None = None) -> None:
     if batch.status != BATCH_MAPPING:
         raise ImportError_("Сопоставление колонок для этого импорта уже выполнено.")
     if "name" not in mapping and "website" not in mapping:
         raise ImportError_("Укажите хотя бы колонку «Название» или «Сайт».")
-    table = read_csv(batch.raw_text or "")
-    parsed = csv_rows(table, [m or "note" for m in mapping], has_header)
+    if parsed is None:
+        parsed = parse_csv(batch.raw_text or "", mapping, has_header)
     batch.status = BATCH_PREVIEW
     _store_rows(db, batch, parsed)
     db.commit()

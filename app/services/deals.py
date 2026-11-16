@@ -254,7 +254,11 @@ def bulk_assign(db: Session, user: User, company_ids: list[int], manager_ids: li
     if not company_ids:
         raise Invalid("Не выбрано ни одной компании.")
     # Чьи сделки пользователь вправе передавать: None — любые.
-    own_scope = None if user.is_owner else {u.id for u in allowed} | {user.id}
+    own_scope = None
+    if not user.is_owner:
+        own_scope = {user.id}
+        if user.team_id:  # вся группа, включая отключённых сотрудников: их сделки нужно уметь передать
+            own_scope |= set(db.scalars(select(User.id).where(User.team_id == user.team_id)))
     default = db.scalar(select(Pipeline).where(Pipeline.is_archived.is_(False)).order_by(Pipeline.is_default.desc(), Pipeline.id))
     assigned = created = turn = 0
     ids = sorted(set(company_ids))

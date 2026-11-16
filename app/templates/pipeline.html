@@ -4,8 +4,8 @@
 <div class="head"><div><h1>Воронка{% if pipeline %}: {{ pipeline.name }}{% endif %}</h1>
 <p class="lead">{{ 'Все сделки отдела' if user.is_owner else ('Сделки вашей группы' if user.is_lead else 'Сделки, где вы ответственный') }}</p></div>
 <form method="get" action="/pipeline" class="row">
-  {% if pipelines|length > 1 %}<div><label>Воронка</label><select name="pipeline_id" onchange="this.form.submit()">{% for p in pipelines %}<option value="{{ p.id }}" {{ 'selected' if pipeline and p.id == pipeline.id }}>{{ p.name }}</option>{% endfor %}</select></div>{% endif %}
-  {% if user.is_boss %}<div><label>Менеджер</label><select name="owner" onchange="this.form.submit()"><option value="">Все</option>{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if owner == m.id|string }}>{{ m.name }}</option>{% endfor %}</select></div>{% endif %}
+  {% if pipelines|length > 1 %}<div><label>Воронка</label><select name="pipeline_id" data-autosubmit>{% for p in pipelines %}<option value="{{ p.id }}" {{ 'selected' if pipeline and p.id == pipeline.id }}>{{ p.name }}</option>{% endfor %}</select></div>{% endif %}
+  {% if user.is_boss %}<div><label>Менеджер</label><select name="owner" data-autosubmit><option value="">Все</option>{% for m in managers %}<option value="{{ m.id }}" {{ 'selected' if owner == m.id|string }}>{{ m.name }}</option>{% endfor %}</select></div>{% endif %}
   <noscript><div class="fit"><button class="btn">Показать</button></div></noscript>
 </form></div>
 

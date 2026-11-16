@@ -66,14 +66,18 @@ def import_create(request: Request, form: FormData = Depends(form_data), user: U
                 raise importer.ImportError_("Выберите файл.")
             data = upload.file.read(config.MAX_IMPORT_BYTES + 1)
             if len(data) > config.MAX_IMPORT_BYTES:
-                raise importer.ImportError_("Файл больше 8 МБ — разделите его на части.")
+                raise importer.ImportError_("Файл больше 2 МБ — разделите его на части.")
             text, name = decode_bytes(data), upload.filename[:200]
         if mode == "csv":
+            db.rollback()
             batch = importer.create_csv_batch(db, user, name, text)
             return redirect(f"/import/{batch.id}/mapping")
         if mode not in ("text", "txt", "sheets"):
             raise importer.ImportError_("Неизвестный способ загрузки.")
-        batch = importer.create_text_batch(db, user, mode, name, text)
+        # Разбор идёт без блокировки базы: длинный список не задерживает остальных.
+        db.rollback()
+        parsed = importer.parse_list(mode, text)
+        batch = importer.create_text_batch(db, user, mode, name, text, parsed)
     except importer.ImportError_ as exc:
         db.rollback()
         ctx = _form_ctx(db, user, str(exc), mode, text if mode in ("text", "sheets") else "")
@@ -97,7 +101,12 @@ def mapping_apply(request: Request, batch_id: int, form: FormData = Depends(form
     mapping = [str(form.get(f"col_{i}", "skip")) for i in range(preview["width"])]
     mapping = [m if m in FIELDS or m == "skip" else "skip" for m in mapping]
     try:
-        importer.apply_csv_mapping(db, batch, mapping, form.get("has_header") == "1")
+        has_header = form.get("has_header") == "1"
+        raw_text = batch.raw_text or ""
+        db.rollback()  # разбор файла — без блокировки базы
+        parsed = importer.parse_csv(raw_text, mapping, has_header)
+        batch = _batch(db, user, batch_id)
+        importer.apply_csv_mapping(db, batch, mapping, has_header, parsed)
     except importer.ImportError_ as exc:
         db.rollback()
         preview["mapping"] = mapping

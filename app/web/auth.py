@@ -1,6 +1,7 @@
 """Вход, выход, смена своего пароля."""
 from __future__ import annotations
 
+import secrets
 import time
 
 from fastapi import APIRouter, Depends, Request
@@ -15,14 +16,31 @@ from .common import current_user, flash, form_data, redirect, render, safe_next
 
 router = APIRouter()
 
+# Счётчики неудачных входов в памяти процесса: по паре «логин + адрес» и по адресу целиком.
 _FAILS: dict[str, list[float]] = {}
-_WINDOW, _LIMIT = 600, 10
+_WINDOW, _LIMIT, _IP_LIMIT, _MAX_KEYS = 600, 10, 50, 5000
+_MAX_LOGIN, _MAX_PASSWORD = 120, 200
 
 
-def _blocked(key: str) -> bool:
+def _recent(key: str) -> int:
     now = time.time()
-    _FAILS[key] = [t for t in _FAILS.get(key, []) if now - t < _WINDOW]
-    return len(_FAILS[key]) >= _LIMIT
+    fresh = [t for t in _FAILS.get(key, []) if now - t < _WINDOW]
+    if fresh:
+        _FAILS[key] = fresh
+    else:
+        _FAILS.pop(key, None)
+    return len(fresh)
+
+
+def _fail(*keys: str) -> None:
+    if len(_FAILS) > _MAX_KEYS:
+        now = time.time()
+        for key in [k for k, v in _FAILS.items() if not v or now - v[-1] >= _WINDOW]:
+            _FAILS.pop(key, None)
+        if len(_FAILS) > _MAX_KEYS:
+            _FAILS.clear()
+    for key in keys:
+        _FAILS.setdefault(key, []).append(time.time())
 
 
 @router.get("/login")
@@ -34,24 +52,36 @@ def login_page(request: Request, next: str = ""):
 def login(request: Request, form: FormData = Depends(form_data), db: Session = Depends(get_db)):
     login_value = str(form.get("login", "")).strip().lower()
     password = str(form.get("password", ""))
-    key = f"{login_value}|{request.client.host if request.client else ''}"
-    if _blocked(key):
-        return render(request, "login.html", {"next": form.get("next", ""), "login": login_value,
+    next_url = safe_next(str(form.get("next", ""))[:500], "/")
+    ip = request.client.host if request.client else ""
+    ip_key, key = f"ip|{ip}", f"{login_value[:_MAX_LOGIN]}|{ip}"
+    if _recent(key) >= _LIMIT or _recent(ip_key) >= _IP_LIMIT:
+        return render(request, "login.html", {"next": next_url, "login": login_value[:_MAX_LOGIN],
                                               "error": "Слишком много попыток. Подождите 10 минут."}, 429)
-    user = db.scalar(select(User).where(func.lower(User.login) == login_value))
+    too_long = len(login_value) > _MAX_LOGIN or len(password) > _MAX_PASSWORD
+    user = None if too_long else db.scalar(select(User).where(func.lower(User.login) == login_value))
     if user is None or not user.is_active or not verify_password(password, user.password_hash):
-        _FAILS.setdefault(key, []).append(time.time())
-        return render(request, "login.html", {"next": form.get("next", ""), "login": login_value,
+        _fail(key, ip_key)
+        return render(request, "login.html", {"next": next_url, "login": login_value[:_MAX_LOGIN],
                                               "error": "Неверный логин или пароль."}, 401)
     _FAILS.pop(key, None)
+    if not user.session_nonce:
+        user.session_nonce = secrets.token_urlsafe(12)
+        db.commit()
     request.session.clear()
     request.session["uid"] = user.id
     request.session["pv"] = user.password_hash[-10:]
-    return redirect(safe_next(str(form.get("next", "")), "/"))
+    request.session["sn"] = user.session_nonce
+    return redirect(next_url)
 
 
 @router.post("/logout")
-def logout(request: Request):
+def logout(request: Request, db: Session = Depends(get_db)):
+    # Выход отзывает все сессии сотрудника: скопированная ранее cookie перестаёт работать.
+    user = db.get(User, request.session.get("uid") or 0)
+    if user is not None and request.session.get("sn") == user.session_nonce:
+        user.session_nonce = secrets.token_urlsafe(12)
+        db.commit()
     request.session.clear()
     return redirect("/login")
 

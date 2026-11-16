@@ -7,7 +7,7 @@
 <div class="actions"><a class="btn" href="/companies">← К списку</a></div></div>
 {% if error %}<div class="flash error">{{ error }}
 {% if dup %}{% if dup.owners %} Она в работе у: {{ dup.owners|join(', ') }}.{% else %} Она ещё никому не назначена.{% endif %}
-{% if dup.id %} <a href="/companies/{{ dup.id }}">Открыть её карточку</a>{% endif %}{% endif %}</div>{% endif %}
+{% if dup.id %} <a href="/companies/{{ dup.id }}">Открыть карточку «{{ dup.name }}»</a>{% endif %}{% endif %}</div>{% endif %}
 
 <div class="grid2">
 <div>
